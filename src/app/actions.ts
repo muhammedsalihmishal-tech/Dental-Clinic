@@ -6,6 +6,8 @@ import type { AppointmentStatus, Channel, PatientStatus, ReminderTrigger, TaskPr
 import { prisma } from "@/lib/prisma";
 import { BookingError, bookAppointment, setAppointmentStatus } from "@/lib/booking";
 import { processDueReminders, scheduleTreatmentFollowUps } from "@/lib/reminders";
+import { sendMessage } from "@/lib/messaging";
+import { clinic } from "@/lib/config";
 import { clinicDateAt, labelToMinutes } from "@/lib/time";
 import { normalizePhone } from "@/lib/utils";
 
@@ -208,6 +210,34 @@ export async function runRemindersNow() {
 export async function cancelReminder(f: FormData) {
   await prisma.reminder.update({ where: { id: str(f, "id")! }, data: { status: "CANCELLED" } });
   revalidatePath("/reminders");
+}
+
+/** Send a "we miss you" message to patients inactive for 12+ months. */
+export async function runReactivationCampaign(): Promise<{ sent: number; skipped: number }> {
+  const cutoff = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
+  const patients = await prisma.patient.findMany({
+    where: { status: "INACTIVE", optOut: false },
+    include: {
+      records: {
+        where: { performedAt: { gte: cutoff } },
+        select: { id: true },
+        take: 1,
+      },
+    },
+  });
+
+  let sent = 0;
+  let skipped = 0;
+
+  for (const p of patients) {
+    if (p.records.length > 0) { skipped++; continue; }
+    const body = `Hi ${p.firstName}, it's been a while since we last saw you at ${clinic.name}! We'd love to catch up and make sure your smile is in great shape. Give us a call at ${clinic.phone} to book your next visit. – ${clinic.name}`;
+    const result = await sendMessage(p.preferredChannel as "SMS" | "WHATSAPP", p.phone, body).catch(() => ({ ok: false }));
+    if (result.ok) sent++; else skipped++;
+  }
+
+  revalidatePath("/reminders");
+  return { sent, skipped };
 }
 
 // ---------- Tasks ----------

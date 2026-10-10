@@ -3,6 +3,8 @@ import { prisma } from "./prisma";
 import { doctorDay, slotFits } from "./availability";
 import { HOLD_MINUTES } from "./config";
 import { clinicDateString } from "./time";
+import { sendMessage } from "./messaging";
+import { clinic } from "./config";
 import {
   cancelPendingAppointmentReminders,
   scheduleAppointmentReminders,
@@ -117,7 +119,25 @@ export async function cancelAppointment(id: string, reason?: string) {
     data: { status: "CANCELLED", ...(reason ? { notes: reason } : {}) },
   });
   await cancelPendingAppointmentReminders(id);
+  await notifyWaitlistForSlot(appt.treatmentTypeId, appt.doctorId);
   return appt;
+}
+
+async function notifyWaitlistForSlot(treatmentTypeId: string, doctorId: string) {
+  const entry = await prisma.waitlist.findFirst({
+    where: {
+      treatmentTypeId,
+      notified: false,
+      OR: [{ doctorId: null }, { doctorId }],
+    },
+    orderBy: { createdAt: "asc" },
+    include: { patient: true, treatmentType: true },
+  });
+  if (!entry) return;
+
+  const body = `Hi ${entry.patient.firstName}, a slot has opened for ${entry.treatmentType.name} at ${clinic.name}. Call us at ${clinic.phone} to book it. – ${clinic.name}`;
+  await sendMessage(entry.patient.preferredChannel as "SMS" | "WHATSAPP", entry.patient.phone, body).catch(() => null);
+  await prisma.waitlist.update({ where: { id: entry.id }, data: { notified: true } });
 }
 
 /** Status changes from the calendar. Completing creates the treatment record and its follow-ups. */

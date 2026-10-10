@@ -4,6 +4,7 @@ import { clinic, QUIET_HOURS } from "./config";
 import { addDays, clinicDateAt, clinicDateString, clinicMinuteOfDay, fmtDate, fmtTime } from "./time";
 import { sendMessage } from "./messaging";
 import { fullName } from "./utils";
+import { generatePersonalisedMessage } from "./ai-messages";
 
 /** Local time of day that day-based reminders go out (10:00). */
 const DAY_REMINDER_MINUTE = 10 * 60;
@@ -152,7 +153,7 @@ export async function processDueReminders(now = new Date()) {
 
     const ctx = appt ?? r.treatmentRecord;
     const when = appt?.start ?? r.treatmentRecord?.performedAt;
-    const message = renderTemplate(r.rule?.template ?? r.message ?? "", {
+    const templateFallback = renderTemplate(r.rule?.template ?? r.message ?? "", {
       firstName: r.patient.firstName,
       fullName: fullName(r.patient),
       clinicName: clinic.name,
@@ -161,6 +162,20 @@ export async function processDueReminders(now = new Date()) {
       treatment: ctx?.treatmentType.name,
       date: when ? fmtDate(when) : undefined,
       time: when ? fmtTime(when) : undefined,
+    });
+    const message = await generatePersonalisedMessage({
+      firstName: r.patient.firstName,
+      fullName: fullName(r.patient),
+      language: r.patient.language,
+      preferredChannel: r.channel,
+      medicalAlerts: r.patient.medicalAlerts,
+      treatmentName: ctx?.treatmentType.name,
+      doctorName: ctx?.doctor.name,
+      date: when ? fmtDate(when) : undefined,
+      clinicName: clinic.name,
+      clinicPhone: clinic.phone,
+      ruleName: r.rule?.name ?? "follow-up",
+      templateFallback,
     });
 
     // Claim the row so a parallel run can't send it twice.

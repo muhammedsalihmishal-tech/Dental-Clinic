@@ -11,8 +11,116 @@ export const dynamic = "force-dynamic";
 
 const HOUR_PX = 88;
 
-export default async function CalendarPage({ searchParams }: { searchParams: { date?: string } }) {
+function weekStart(date: string): string {
+  // Monday of the week containing `date`
+  const d = new Date(`${date}T00:00:00`);
+  const dow = d.getDay(); // 0=Sun
+  const diff = dow === 0 ? -6 : 1 - dow;
+  const mon = new Date(d);
+  mon.setDate(d.getDate() + diff);
+  return mon.toISOString().slice(0, 10);
+}
+
+export default async function CalendarPage({ searchParams }: { searchParams: { date?: string; view?: string } }) {
   const date = searchParams.date && /^\d{4}-\d{2}-\d{2}$/.test(searchParams.date) ? searchParams.date : todayString();
+  const view = searchParams.view === "week" ? "week" : "day";
+  const today = todayString();
+
+  if (view === "week") {
+    const monday = weekStart(date);
+    const weekDates = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
+    const weekStart_ = clinicDateAt(monday, 0);
+    const weekEnd = clinicDateAt(addDays(monday, 7), 0);
+    const prevWeek = addDays(monday, -7);
+    const nextWeek = addDays(monday, 7);
+
+    const doctors = await prisma.doctor.findMany({
+      where: { active: true },
+      orderBy: { name: "asc" },
+    });
+
+    const appointments = await prisma.appointment.findMany({
+      where: {
+        start: { gte: weekStart_, lt: weekEnd },
+        status: { not: "CANCELLED" },
+        NOT: { status: "HELD", holdExpiresAt: { lte: new Date() } },
+      },
+      include: { patient: true, doctor: true, treatmentType: true },
+      orderBy: { start: "asc" },
+    });
+
+    // Group by date string
+    const byDate: Record<string, typeof appointments> = {};
+    for (const a of appointments) {
+      const key = a.start.toISOString().slice(0, 10);
+      (byDate[key] ??= []).push(a);
+    }
+
+    return (
+      <>
+        <PageHeader
+          title="Calendar"
+          subtitle={`Week of ${fmt(new Date(`${monday}T00:00:00`), "d MMMM yyyy")}`}
+          actions={
+            <>
+              <Link href={`/calendar?view=week&date=${prevWeek}`} className="btn-ghost" aria-label="Previous week"><ChevronLeft className="h-4 w-4" /></Link>
+              <Link href={`/calendar?view=week&date=${today}`} className="btn-ghost">This week</Link>
+              <Link href={`/calendar?view=week&date=${nextWeek}`} className="btn-ghost" aria-label="Next week"><ChevronRight className="h-4 w-4" /></Link>
+              <div className="flex gap-1 rounded-xl border border-border p-1">
+                <Link href={`/calendar?date=${date}`} className="btn-ghost btn-sm">Day</Link>
+                <Link href={`/calendar?view=week&date=${date}`} className="btn-primary btn-sm">Week</Link>
+              </div>
+            </>
+          }
+        />
+
+        <div className="card fade-in overflow-x-auto">
+          <div className="grid min-w-[700px]" style={{ gridTemplateColumns: `repeat(7, minmax(0, 1fr))` }}>
+            {weekDates.map((d) => {
+              const isToday = d === today;
+              const appts = byDate[d] ?? [];
+              return (
+                <div key={d} className={cn("border-border [&:not(:first-child)]:border-l", isToday && "bg-brand/5")}>
+                  <div className={cn("flex items-center justify-between border-b border-border px-3 py-2", isToday && "border-brand/30")}>
+                    <div className="text-xs">
+                      <div className={cn("font-semibold", isToday && "text-brand")}>
+                        {new Date(`${d}T00:00:00`).toLocaleString("en", { weekday: "short" })}
+                      </div>
+                      <div className="text-muted">{new Date(`${d}T00:00:00`).toLocaleString("en", { day: "numeric", month: "short" })}</div>
+                    </div>
+                    <Link href={`/calendar?date=${d}`} className="text-xs text-brand hover:underline">{appts.length > 0 ? `${appts.length} appt${appts.length === 1 ? "" : "s"}` : "+"}</Link>
+                  </div>
+                  <div className="min-h-[160px] space-y-1 p-2">
+                    {appts.length === 0 && <div className="py-6 text-center text-xs text-muted">Free</div>}
+                    {appts.map((a) => (
+                      <Link
+                        key={a.id}
+                        href={`/calendar?date=${d}`}
+                        className="block overflow-hidden rounded-lg border-l-4 px-2 py-1 text-xs transition hover:opacity-80"
+                        style={{ borderColor: a.treatmentType.color, background: `${a.treatmentType.color}20` }}
+                      >
+                        <div className="flex items-center gap-1 font-semibold truncate">
+                          {a.source === "VOICE_AI" && <Bot className="h-3 w-3 shrink-0" />}
+                          <span className="truncate">{a.patient.firstName}</span>
+                        </div>
+                        <div className="truncate text-muted">{fmtTime(a.start)} · {a.doctor.name.split(" ")[1]}</div>
+                        <AppointmentBadge status={a.status} />
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <p className="mt-3 text-xs text-muted">
+          Click on any day or appointment to open the day view. <Bot className="inline h-3 w-3" /> marks AI-booked appointments.
+        </p>
+      </>
+    );
+  }
+
+  // ── Day view ──────────────────────────────────────────────────────────────
   const dayStart = clinicDateAt(date, 0);
   const dayEnd = clinicDateAt(addDays(date, 1), 0);
   const dow = dayOfWeek(date);
@@ -56,6 +164,10 @@ export default async function CalendarPage({ searchParams }: { searchParams: { d
               <input type="date" name="date" defaultValue={date} className="input w-auto" />
               <button className="btn-ghost">Go</button>
             </form>
+            <div className="flex gap-1 rounded-xl border border-border p-1">
+              <Link href={`/calendar?date=${date}`} className="btn-primary btn-sm">Day</Link>
+              <Link href={`/calendar?view=week&date=${date}`} className="btn-ghost btn-sm">Week</Link>
+            </div>
           </>
         }
       />
@@ -88,7 +200,6 @@ export default async function CalendarPage({ searchParams }: { searchParams: { d
               {hours.map((h) => (
                 <div key={h} className="absolute inset-x-0 border-t border-border/60" style={{ top: top(h * 60) }} />
               ))}
-              {/* Off-hours shading: everything outside working blocks */}
               <div className="absolute inset-0 bg-[repeating-linear-gradient(135deg,transparent,transparent_6px,rgb(var(--surface-2))_6px,rgb(var(--surface-2))_12px)]" />
               {d.timeOff.length === 0 &&
                 d.workingHours.map((w) => (

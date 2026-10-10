@@ -6,6 +6,7 @@ import { fullName, titleCase, CHANNEL_LABEL } from "@/lib/utils";
 import { Badge, Card, Empty, Field, PageHeader } from "@/components/ui";
 import { ReminderBadge } from "@/components/badges";
 import { cancelReminder, createRule, deleteRule, runRemindersNow, toggleRule } from "../actions";
+import { ReactivateButton } from "./ReactivateButton";
 
 export const dynamic = "force-dynamic";
 
@@ -30,9 +31,12 @@ export default async function RemindersPage() {
         title="Follow-ups & reminders"
         subtitle="Rules run automatically: appointment reminders, post-treatment check-ins, recalls and no-show rebooking."
         actions={
-          <form action={runRemindersNow}>
-            <button className="btn-ghost"><Play className="h-4 w-4" /> Send due messages now</button>
-          </form>
+          <div className="flex gap-2">
+            <ReactivateButton />
+            <form action={runRemindersNow}>
+              <button className="btn-ghost"><Play className="h-4 w-4" /> Send due messages now</button>
+            </form>
+          </div>
         }
       />
 
