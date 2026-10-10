@@ -8,6 +8,10 @@ A premium CRM for dental clinics, built for AI automation:
 - **AI voice receptionist API**: tools for finding or creating patients, checking availability, holding, booking, rescheduling, cancelling and escalating emergencies, plus a call-report webhook. See [docs/voice-agent.md](docs/voice-agent.md).
 - **Automated follow-ups**: rules such as *"15 days after any treatment → WhatsApp check-in"*, *24h/2h appointment reminders*, *6-month cleaning recall*, *next-day check after extraction* and *no-show rebooking*. Rules have quiet hours, opt-out handling and dedupe, and send through Twilio SMS or WhatsApp (simulated when Twilio isn't configured).
 - **Dashboard**: today's schedule, AI-booked count, new patients, no-shows, revenue, tasks and recent calls. Light and dark themes, responsive down to phone width.
+- **Auth**: staff login (email + password) with roles — Admin, Doctor, Receptionist. Admin-only user management and audit log.
+- **Reports**: monthly revenue chart, revenue by treatment, doctor utilization, AI call outcomes, booking sources and patient pipeline, all computed from live data.
+- **Waitlist**: queue patients for a treatment/doctor; one click notifies them via their preferred channel when a slot opens.
+- **No-show risk**: heuristic score (0–100, Low/Medium/High) per patient based on past no-show rate, recent missed appointments and gap since last visit — visible on the patient profile and patients list.
 
 ## Stack
 
@@ -16,12 +20,15 @@ Next.js 14 (App Router, server actions) · TypeScript · Tailwind CSS · Postgre
 ## Getting started
 
 ```bash
-cp .env.example .env          # set DATABASE_URL, clinic details and secrets
+cp .env.example .env          # set DATABASE_URL, NEXTAUTH_SECRET, clinic details and secrets
 npm install
 npm run db:push               # create tables
 npm run db:seed               # demo doctors, patients, appointments and rules
 npm run dev                   # http://localhost:3000
 ```
+
+Login with the seeded admin account: **admin@smilestudio.com / admin1234** — change the password immediately.
+Generate `NEXTAUTH_SECRET` with `openssl rand -base64 32`.
 
 ### Sending reminders
 
@@ -56,8 +63,8 @@ src/app/...                 dashboard, calendar, patients, doctors, follow-ups, 
 
 ## Roadmap
 
-- Staff login with roles (admin, doctor, receptionist) and an audit log. **The app has no authentication yet, so don't expose it publicly.**
-- AI-personalised message wording and two-way replies (YES confirms, RESCHEDULE triggers a rebook)
-- Drag-and-drop rescheduling and a week view
-- Waitlist auto-fill on cancellations, no-show risk scores, review requests, reactivation campaigns
-- Outbound AI confirmation calls, reports and multi-clinic support
+- AI-personalised message wording (Claude-generated, per-patient context) and two-way replies (YES confirms, RESCHEDULE triggers a rebook)
+- Drag-and-drop rescheduling and a week calendar view
+- Auto-fill waitlist on cancellations (send notification automatically when a matching slot opens)
+- Google review requests after successful visits, reactivation campaigns for 12-month-inactive patients
+- Outbound AI confirmation calls and multi-clinic support

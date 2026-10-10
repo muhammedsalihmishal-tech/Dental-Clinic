@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import { hash } from "bcryptjs";
 import { addDays, clinicDateAt, todayString } from "../src/lib/time";
 
 const prisma = new PrismaClient();
@@ -7,6 +8,8 @@ const h = (hour: number, min = 0) => hour * 60 + min;
 
 async function main() {
   await prisma.$transaction([
+    prisma.auditLog.deleteMany(),
+    prisma.waitlist.deleteMany(),
     prisma.reminder.deleteMany(),
     prisma.reminderRule.deleteMany(),
     prisma.treatmentRecord.deleteMany(),
@@ -19,6 +22,7 @@ async function main() {
     prisma.workingHours.deleteMany(),
     prisma.doctor.deleteMany(),
     prisma.treatmentType.deleteMany(),
+    prisma.user.deleteMany(),
   ]);
 
   const treatments = Object.fromEntries(
@@ -290,7 +294,16 @@ async function main() {
     ],
   });
 
+  // Seed staff accounts
+  await prisma.user.createMany({
+    data: [
+      { name: "Admin", email: "admin@smilestudio.com", passwordHash: await hash("admin1234", 12), role: "ADMIN" },
+      { name: "Reception", email: "reception@smilestudio.com", passwordHash: await hash("reception1234", 12), role: "RECEPTIONIST" },
+    ],
+  });
+
   console.log("Seeded demo clinic.");
+  console.log("Login: admin@smilestudio.com / admin1234  (change after first login)");
 }
 
 main()

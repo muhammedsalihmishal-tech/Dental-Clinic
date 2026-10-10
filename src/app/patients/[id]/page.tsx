@@ -8,6 +8,7 @@ import { formatMoney, fullName, titleCase, CHANNEL_LABEL } from "@/lib/utils";
 import { Avatar, Badge, Card, Empty, Field } from "@/components/ui";
 import { AppointmentBadge, CallBadge, PatientBadge, ReminderBadge } from "@/components/badges";
 import { addNote, createTask, recordTreatment } from "@/app/actions";
+import { noShowRiskScore } from "@/lib/risk";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +33,7 @@ export default async function PatientPage({ params }: { params: { id: string } }
   ]);
 
   const now = new Date();
+  const risk = noShowRiskScore(patient);
   const upcoming = patient.appointments
     .filter((a) => a.start > now && (["SCHEDULED", "CONFIRMED"].includes(a.status) || (a.status === "HELD" && a.holdExpiresAt! > now)))
     .reverse();
@@ -128,7 +130,7 @@ export default async function PatientPage({ params }: { params: { id: string } }
             ⚠ {[patient.medicalAlerts, patient.allergies && `Allergies: ${patient.allergies}`].filter(Boolean).join(" · ")}
           </div>
         )}
-        <div className="grid grid-cols-2 border-t border-border sm:grid-cols-4">
+        <div className="grid grid-cols-2 border-t border-border sm:grid-cols-5">
           {[
             ["Visits", visits],
             ["Lifetime value", formatMoney(lifetime)],
@@ -140,6 +142,13 @@ export default async function PatientPage({ params }: { params: { id: string } }
               <div className="text-sm font-semibold">{v}</div>
             </div>
           ))}
+          <div className="border-border px-6 py-3 [&:not(:first-child)]:border-l">
+            <div className="text-xs text-muted">No-show risk</div>
+            <div className="flex items-center gap-1.5 text-sm font-semibold" style={{ color: risk.color }}>
+              <span className="h-2 w-2 rounded-full" style={{ background: risk.color }} />
+              {risk.label} ({risk.score})
+            </div>
+          </div>
         </div>
       </div>
 

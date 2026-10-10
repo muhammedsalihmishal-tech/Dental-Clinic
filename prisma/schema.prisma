@@ -79,6 +79,12 @@ enum TaskPriority {
   URGENT
 }
 
+enum UserRole {
+  ADMIN
+  DOCTOR
+  RECEPTIONIST
+}
+
 model Doctor {
   id           String            @id @default(cuid())
   name         String
@@ -92,6 +98,7 @@ model Doctor {
   treatments   TreatmentType[]
   appointments Appointment[]
   records      TreatmentRecord[]
+  waitlist     Waitlist[]
   createdAt    DateTime          @default(now())
 }
 
@@ -129,6 +136,7 @@ model TreatmentType {
   appointments    Appointment[]
   records         TreatmentRecord[]
   reminderRules   ReminderRule[]
+  waitlist        Waitlist[]
 }
 
 model Patient {
@@ -155,6 +163,7 @@ model Patient {
   calls            CallLog[]
   timelineNotes    Note[]
   tasks            Task[]
+  waitlist         Waitlist[]
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 
@@ -272,4 +281,44 @@ model Task {
   dueAt     DateTime?
   done      Boolean      @default(false)
   createdAt DateTime     @default(now())
+}
+
+model User {
+  id           String     @id @default(cuid())
+  name         String
+  email        String     @unique
+  passwordHash String
+  role         UserRole   @default(RECEPTIONIST)
+  active       Boolean    @default(true)
+  auditLogs    AuditLog[]
+  createdAt    DateTime   @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  action    String
+  entity    String
+  entityId  String?
+  detail    String?
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([entity, entityId])
+}
+
+model Waitlist {
+  id              String        @id @default(cuid())
+  patientId       String
+  patient         Patient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  treatmentTypeId String
+  treatmentType   TreatmentType @relation(fields: [treatmentTypeId], references: [id])
+  doctorId        String?
+  doctor          Doctor?       @relation(fields: [doctorId], references: [id])
+  notes           String?
+  notified        Boolean       @default(false)
+  createdAt       DateTime      @default(now())
+
+  @@index([treatmentTypeId, createdAt])
 }

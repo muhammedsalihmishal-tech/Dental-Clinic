@@ -6,6 +6,7 @@ import { fmtDate } from "@/lib/time";
 import { cn, fullName, titleCase } from "@/lib/utils";
 import { Avatar, Badge, Card, Empty, PageHeader } from "@/components/ui";
 import { PatientBadge } from "@/components/badges";
+import { noShowRiskScore } from "@/lib/risk";
 
 export const dynamic = "force-dynamic";
 
@@ -39,9 +40,8 @@ export default async function PatientsPage({ searchParams }: { searchParams: { q
       take: 200,
       include: {
         appointments: {
-          where: { start: { gt: now }, status: { in: ["SCHEDULED", "CONFIRMED"] } },
-          orderBy: { start: "asc" },
-          take: 1,
+          orderBy: { start: "desc" },
+          select: { status: true, start: true },
         },
         records: { orderBy: { performedAt: "desc" }, take: 1, include: { treatmentType: true } },
       },
@@ -81,7 +81,8 @@ export default async function PatientsPage({ searchParams }: { searchParams: { q
                   <th className="table-head">Patient</th>
                   <th className="table-head">Status</th>
                   <th className="table-head hidden md:table-cell">Last treatment</th>
-                  <th className="table-head">Next visit</th>
+                  <th className="table-head hidden lg:table-cell">Next visit</th>
+                  <th className="table-head hidden xl:table-cell">Risk</th>
                   <th className="table-head hidden lg:table-cell">Tags</th>
                 </tr>
               </thead>
@@ -101,7 +102,15 @@ export default async function PatientsPage({ searchParams }: { searchParams: { q
                     <td className="table-cell hidden text-muted md:table-cell">
                       {p.records[0] ? `${p.records[0].treatmentType.name} · ${fmtDate(p.records[0].performedAt)}` : "—"}
                     </td>
-                    <td className="table-cell text-muted">{p.appointments[0] ? fmtDate(p.appointments[0].start) : "—"}</td>
+                    <td className="table-cell hidden text-muted lg:table-cell">
+                      {(() => {
+                        const next = p.appointments.filter((a) => ["SCHEDULED", "CONFIRMED"].includes(a.status) && a.start > now).sort((a, b) => a.start.getTime() - b.start.getTime())[0];
+                        return next ? fmtDate(next.start) : "—";
+                      })()}
+                    </td>
+                    <td className="table-cell hidden xl:table-cell">
+                      {(() => { const r = noShowRiskScore(p); return r.score > 0 ? <span className="text-xs font-medium" style={{ color: r.color }}>{r.label}</span> : <span className="text-muted">—</span>; })()}
+                    </td>
                     <td className="table-cell hidden lg:table-cell">
                       <div className="flex flex-wrap gap-1">
                         {p.medicalAlerts && <Badge tone="rose">⚠ Alert</Badge>}

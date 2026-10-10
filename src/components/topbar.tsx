@@ -3,13 +3,15 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Moon, Plus, Search, Sun } from "lucide-react";
+import { useSession, signOut } from "next-auth/react";
+import { LogOut, Moon, Plus, Search, Settings, Sun } from "lucide-react";
 import { NAV } from "./nav";
 import { cn } from "@/lib/utils";
 
 export function Topbar() {
   const router = useRouter();
   const path = usePathname();
+  const { data: session } = useSession();
   const [dark, setDark] = useState(false);
   useEffect(() => setDark(document.documentElement.classList.contains("dark")), []);
 
@@ -17,9 +19,7 @@ export function Topbar() {
     const next = !dark;
     setDark(next);
     document.documentElement.classList.toggle("dark", next);
-    try {
-      localStorage.setItem("theme", next ? "dark" : "light");
-    } catch {}
+    try { localStorage.setItem("theme", next ? "dark" : "light"); } catch {}
   };
 
   return (
@@ -42,6 +42,22 @@ export function Topbar() {
         <Link href="/appointments/new" className="btn-primary">
           <Plus className="h-4 w-4" /> <span className="hidden sm:inline">New appointment</span>
         </Link>
+        {session?.user && (
+          <div className="flex items-center gap-1">
+            {(session.user as { role?: string }).role === "ADMIN" && (
+              <Link href="/settings/users" className="btn-ghost h-9 w-9 p-0" title="Settings">
+                <Settings className="h-4 w-4" />
+              </Link>
+            )}
+            <button
+              onClick={() => signOut({ callbackUrl: "/login" })}
+              className="btn-ghost h-9 w-9 p-0"
+              title={`Sign out (${session.user.name ?? session.user.email})`}
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
+          </div>
+        )}
       </div>
       <nav className="flex gap-1 overflow-x-auto px-4 pb-2 lg:hidden">
         {NAV.map(({ href, label }) => {
