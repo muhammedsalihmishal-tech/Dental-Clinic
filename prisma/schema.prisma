@@ -167,6 +167,9 @@ model Patient {
   tasks            Task[]
   waitlist         Waitlist[]
   invoices         Invoice[]
+  plans            TreatmentPlan[]
+  labOrders        LabOrder[]
+  campaignMessages CampaignMessage[]
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 
@@ -212,6 +215,9 @@ model TreatmentRecord {
   cost            Int             @default(0)
   reminders       Reminder[]
   invoice         Invoice?
+  planId          String?
+  plan            TreatmentPlan?  @relation(fields: [planId], references: [id], onDelete: SetNull)
+  labOrders       LabOrder[]
 }
 
 /// "X days after <treatment>, send <message> via <channel>"
@@ -348,6 +354,25 @@ enum InvoiceStatus {
   VOID
 }
 
+enum TreatmentPlanStatus {
+  ACTIVE
+  COMPLETED
+  ABANDONED
+}
+
+enum LabOrderStatus {
+  SENT
+  RECEIVED
+  APPROVED
+  REJECTED
+}
+
+enum CampaignStatus {
+  DRAFT
+  SENDING
+  SENT
+}
+
 model Invoice {
   id                String          @id @default(cuid())
   number            String          @unique // e.g. INV-0001
@@ -364,4 +389,67 @@ model Invoice {
   updatedAt         DateTime        @updatedAt
 
   @@index([patientId, createdAt])
+}
+
+model TreatmentPlan {
+  id        String              @id @default(cuid())
+  patientId String
+  patient   Patient             @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  title     String
+  notes     String?
+  status    TreatmentPlanStatus @default(ACTIVE)
+  records   TreatmentRecord[]
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  @@index([patientId, createdAt])
+}
+
+model LabOrder {
+  id                String           @id @default(cuid())
+  patientId         String
+  patient           Patient          @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  treatmentRecordId String?
+  treatmentRecord   TreatmentRecord? @relation(fields: [treatmentRecordId], references: [id], onDelete: SetNull)
+  labName           String
+  material          String?
+  shade             String?
+  sentAt            DateTime         @default(now())
+  dueAt             DateTime?
+  receivedAt        DateTime?
+  status            LabOrderStatus   @default(SENT)
+  notes             String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  @@index([patientId, sentAt])
+  @@index([status, dueAt])
+}
+
+model Campaign {
+  id        String            @id @default(cuid())
+  name      String
+  message   String
+  channel   Channel           @default(WHATSAPP)
+  segment   Json              // { statuses?: string[], tags?: string[], lastSeenBeforeDays?: number }
+  status    CampaignStatus    @default(DRAFT)
+  sentAt    DateTime?
+  sentCount Int               @default(0)
+  failCount Int               @default(0)
+  messages  CampaignMessage[]
+  createdAt DateTime          @default(now())
+}
+
+model CampaignMessage {
+  id         String   @id @default(cuid())
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  patientId  String
+  patient    Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  sent       Boolean  @default(false)
+  error      String?
+  createdAt  DateTime @default(now())
+
+  @@index([campaignId])
+  @@index([patientId])
 }
