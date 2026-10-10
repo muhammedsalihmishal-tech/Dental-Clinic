@@ -6,6 +6,7 @@ import { formatMoney, fullName } from "@/lib/utils";
 import { Avatar, Badge, Card, Empty, PageHeader, StatCard } from "@/components/ui";
 import { AppointmentBadge, CallBadge } from "@/components/badges";
 import { completeTask, createTask } from "./actions";
+import { noShowRiskScore } from "@/lib/risk";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +25,18 @@ export default async function Dashboard() {
   const [todayAppts, aiBooked, newPatients, noShows, pendingReminders, calls, tasks, revenue] = await Promise.all([
     prisma.appointment.findMany({
       where: { start: { gte: dayStart, lt: dayEnd }, status: { notIn: ["CANCELLED", "HELD"] } },
-      include: { patient: true, doctor: true, treatmentType: true },
+      include: {
+        patient: {
+          include: {
+            appointments: {
+              where: { status: { in: ["COMPLETED", "NO_SHOW", "CANCELLED"] } },
+              select: { status: true, start: true },
+            },
+          },
+        },
+        doctor: true,
+        treatmentType: true,
+      },
       orderBy: { start: "asc" },
     }),
     prisma.appointment.count({ where: { source: "VOICE_AI", createdAt: { gte: weekAgo }, status: { not: "HELD" } } }),
@@ -81,6 +93,7 @@ export default async function Dashboard() {
                     </Badge>
                   )}
                   {a.patient.medicalAlerts && <Badge tone="rose" className="hidden md:inline-flex">⚠ {a.patient.medicalAlerts}</Badge>}
+                  {(() => { const r = noShowRiskScore(a.patient); return r.score >= 25 ? <span className="hidden md:inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: r.color + "22", color: r.color }}>{r.label} risk</span> : null; })()}
                   <AppointmentBadge status={a.status} />
                 </li>
               ))}

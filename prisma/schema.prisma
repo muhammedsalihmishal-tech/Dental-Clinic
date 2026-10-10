@@ -440,6 +440,15 @@ model Campaign {
   createdAt DateTime          @default(now())
 }
 
+model ClinicSettings {
+  id        String   @id @default("default")
+  name      String   @default("Smile Studio Dental")
+  phone     String   @default("")
+  address   String   @default("")
+  timezone  String   @default("Asia/Kolkata")
+  updatedAt DateTime @updatedAt
+}
+
 model CampaignMessage {
   id         String   @id @default(cuid())
   campaignId String
