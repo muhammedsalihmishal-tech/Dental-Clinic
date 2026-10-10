@@ -1,4 +1,4 @@
-import { BarChart3, Bell, CalendarDays, ClipboardList, LayoutDashboard, PhoneCall, Stethoscope, Users } from "lucide-react";
+import { BarChart3, Bell, CalendarDays, ClipboardList, LayoutDashboard, PhoneCall, Settings, Stethoscope, Users } from "lucide-react";
 
 export const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -9,4 +9,5 @@ export const NAV = [
   { href: "/calls", label: "AI Calls", icon: PhoneCall },
   { href: "/waitlist", label: "Waitlist", icon: ClipboardList },
   { href: "/reports", label: "Reports", icon: BarChart3 },
+  { href: "/settings/treatments", label: "Treatments", icon: Settings },
 ];

@@ -14,6 +14,7 @@ function describe(rule: { trigger: string; offsetDays: number; offsetHours: numb
   const parts = [rule.offsetDays && `${rule.offsetDays} day${rule.offsetDays === 1 ? "" : "s"}`, rule.offsetHours && `${rule.offsetHours}h`].filter(Boolean).join(" ");
   if (rule.trigger === "BEFORE_APPOINTMENT") return `${parts || "0h"} before the appointment`;
   if (rule.trigger === "AFTER_MISSED") return `${parts || "Right"} after a missed appointment`;
+  if (rule.trigger === "AFTER_COMPLETED") return `${parts || "Same day"} after a completed visit`;
   return `${parts || "Same day"} after the treatment`;
 }
 
@@ -76,6 +77,7 @@ export default async function RemindersPage() {
             <Field label="When">
               <select name="trigger" className="input">
                 <option value="AFTER_TREATMENT">After a treatment is completed</option>
+                <option value="AFTER_COMPLETED">After a visit is marked completed (review request)</option>
                 <option value="BEFORE_APPOINTMENT">Before an appointment</option>
                 <option value="AFTER_MISSED">After a missed appointment</option>
               </select>
@@ -99,7 +101,7 @@ export default async function RemindersPage() {
               <textarea name="template" rows={4} required className="input" defaultValue={"Hi {{firstName}}, it's been a couple of weeks since your {{treatment}} with {{doctorName}}. How are you feeling? Just reply here if anything doesn't feel right. – {{clinicName}}"} />
             </Field>
             <p className="text-xs text-muted">
-              Variables: {"{{firstName}} {{fullName}} {{treatment}} {{doctorName}} {{date}} {{time}} {{clinicName}} {{clinicPhone}}"}. Day-based messages go out at 10 AM; nothing is sent between 9 PM and 8 AM.
+              Variables: {"{{firstName}} {{fullName}} {{treatment}} {{doctorName}} {{date}} {{time}} {{clinicName}} {{clinicPhone}} {{reviewLink}}"}. Day-based messages go out at 10 AM; nothing is sent between 9 PM and 8 AM.
             </p>
             <button className="btn-primary w-full">Create rule</button>
           </form>
