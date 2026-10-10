@@ -6,7 +6,7 @@ import { Sparkles } from "lucide-react";
 import { NAV } from "./nav";
 import { cn } from "@/lib/utils";
 
-export function Sidebar() {
+export function Sidebar({ inboxCount = 0 }: { inboxCount?: number }) {
   const path = usePathname();
   return (
     <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r border-border bg-surface px-4 py-6 lg:flex">
@@ -22,6 +22,7 @@ export function Sidebar() {
       <nav className="space-y-1">
         {NAV.map(({ href, label, icon: Icon }) => {
           const active = href === "/" ? path === "/" : path.startsWith(href);
+          const badge = href === "/inbox" && inboxCount > 0 ? inboxCount : null;
           return (
             <Link
               key={href}
@@ -33,6 +34,11 @@ export function Sidebar() {
             >
               <Icon className="h-4 w-4" />
               {label}
+              {badge !== null && (
+                <span className="ml-auto rounded-full bg-brand px-1.5 py-0.5 text-[10px] font-semibold text-white leading-none">
+                  {badge > 99 ? "99+" : badge}
+                </span>
+              )}
             </Link>
           );
         })}

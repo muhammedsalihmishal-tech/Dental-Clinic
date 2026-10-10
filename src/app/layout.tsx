@@ -3,6 +3,7 @@ import "./globals.css";
 import { Sidebar } from "@/components/sidebar";
 import { Topbar } from "@/components/topbar";
 import { AuthSessionProvider } from "@/components/session-provider";
+import { prisma } from "@/lib/prisma";
 
 export const metadata: Metadata = {
   title: "Dental CRM",
@@ -12,7 +13,9 @@ export const metadata: Metadata = {
 // Applies the saved theme before paint to avoid a flash.
 const themeScript = `try{var t=localStorage.getItem('theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme: dark)').matches))document.documentElement.classList.add('dark')}catch(e){}`;
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const inboxCount = await prisma.inboundMessage.count({ where: { handled: false } }).catch(() => 0);
+
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
@@ -21,7 +24,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="font-sans">
         <AuthSessionProvider>
           <div className="flex min-h-screen">
-            <Sidebar />
+            <Sidebar inboxCount={inboxCount} />
             <div className="flex min-w-0 flex-1 flex-col">
               <Topbar />
               <main className="mx-auto w-full max-w-7xl flex-1 px-4 pb-16 pt-6 sm:px-8">{children}</main>
