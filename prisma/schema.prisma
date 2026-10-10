@@ -166,6 +166,7 @@ model Patient {
   timelineNotes    Note[]
   tasks            Task[]
   waitlist         Waitlist[]
+  invoices         Invoice[]
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 
@@ -210,6 +211,7 @@ model TreatmentRecord {
   notes           String?
   cost            Int             @default(0)
   reminders       Reminder[]
+  invoice         Invoice?
 }
 
 /// "X days after <treatment>, send <message> via <channel>"
@@ -337,4 +339,29 @@ model InboundMessage {
   createdAt   DateTime @default(now())
 
   @@index([from, createdAt])
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  VOID
+}
+
+model Invoice {
+  id                String          @id @default(cuid())
+  number            String          @unique // e.g. INV-0001
+  patientId         String
+  patient           Patient         @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  treatmentRecordId String?         @unique
+  treatmentRecord   TreatmentRecord? @relation(fields: [treatmentRecordId], references: [id], onDelete: SetNull)
+  amount            Int             // in smallest currency unit (paise)
+  status            InvoiceStatus   @default(DRAFT)
+  notes             String?
+  issuedAt          DateTime        @default(now())
+  paidAt            DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@index([patientId, createdAt])
 }

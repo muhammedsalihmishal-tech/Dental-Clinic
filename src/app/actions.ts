@@ -2,14 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import type { AppointmentStatus, Channel, PatientStatus, ReminderTrigger, TaskPriority } from "@prisma/client";
+import type { AppointmentStatus, Channel, InvoiceStatus, PatientStatus, ReminderTrigger, TaskPriority } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { BookingError, bookAppointment, rescheduleAppointment, setAppointmentStatus } from "@/lib/booking";
 import { processDueReminders, scheduleTreatmentFollowUps } from "@/lib/reminders";
 import { sendMessage } from "@/lib/messaging";
 import { clinic } from "@/lib/config";
 import { clinicDateAt, labelToMinutes } from "@/lib/time";
-import { normalizePhone } from "@/lib/utils";
+import { formatMoney, normalizePhone } from "@/lib/utils";
 
 const str = (f: FormData, k: string) => {
   const v = f.get(k);
@@ -293,4 +293,96 @@ export async function createTask(f: FormData) {
 export async function completeTask(f: FormData) {
   await prisma.task.update({ where: { id: str(f, "id")! }, data: { done: true } });
   revalidatePath("/", "layout");
+}
+
+// ---------- Invoices ----------
+
+async function nextInvoiceNumber(): Promise<string> {
+  const last = await prisma.invoice.findFirst({ orderBy: { createdAt: "desc" }, select: { number: true } });
+  const n = last ? parseInt(last.number.replace(/\D/g, ""), 10) + 1 : 1;
+  return `INV-${String(n).padStart(4, "0")}`;
+}
+
+export async function createInvoice(f: FormData) {
+  const treatmentRecordId = str(f, "treatmentRecordId");
+  const patientId = str(f, "patientId")!;
+  const amount = int(f, "amount");
+  const number = await nextInvoiceNumber();
+  await prisma.invoice.create({
+    data: {
+      number,
+      patientId,
+      treatmentRecordId: treatmentRecordId ?? null,
+      amount,
+      notes: str(f, "notes") ?? null,
+      status: "DRAFT",
+    },
+  });
+  revalidatePath("/invoices");
+  revalidatePath(`/patients/${patientId}`);
+}
+
+export async function updateInvoiceStatus(f: FormData) {
+  const id = str(f, "id")!;
+  const status = str(f, "status") as InvoiceStatus;
+  await prisma.invoice.update({
+    where: { id },
+    data: { status, paidAt: status === "PAID" ? new Date() : undefined },
+  });
+  revalidatePath("/invoices");
+}
+
+export async function sendInvoiceMessage(f: FormData) {
+  const id = str(f, "id")!;
+  const inv = await prisma.invoice.findUniqueOrThrow({
+    where: { id },
+    include: { patient: true, treatmentRecord: { include: { treatmentType: true, doctor: true } } },
+  });
+  const treatmentLine = inv.treatmentRecord
+    ? `${inv.treatmentRecord.treatmentType.name} with ${inv.treatmentRecord.doctor.name}`
+    : "your recent visit";
+  const body = `Hi ${inv.patient.firstName}, your invoice ${inv.number} for ${treatmentLine} is ₹${formatMoney(inv.amount)} (${inv.status}). For queries call ${clinic.phone}. – ${clinic.name}`;
+  await sendMessage(inv.patient.preferredChannel as "SMS" | "WHATSAPP", inv.patient.phone, body);
+  await prisma.invoice.update({ where: { id }, data: { status: "SENT" } });
+  revalidatePath("/invoices");
+}
+
+// ---------- Inbound inbox ----------
+
+export async function markInboundHandled(f: FormData) {
+  await prisma.inboundMessage.update({ where: { id: str(f, "id")! }, data: { handled: true } });
+  revalidatePath("/inbox");
+}
+
+export async function markAllInboundHandled() {
+  await prisma.inboundMessage.updateMany({ where: { handled: false }, data: { handled: true } });
+  revalidatePath("/inbox");
+}
+
+// ---------- Reminder rules (settings page) ----------
+
+export async function saveReminderRule(f: FormData) {
+  const id = str(f, "id");
+  const data = {
+    name: str(f, "name") ?? "Untitled",
+    trigger: str(f, "trigger") as ReminderTrigger,
+    treatmentTypeId: str(f, "treatmentTypeId") ?? null,
+    offsetDays: int(f, "offsetDays"),
+    offsetHours: int(f, "offsetHours"),
+    channel: (str(f, "channel") ?? "WHATSAPP") as Channel,
+    template: str(f, "template") ?? "",
+    active: f.get("active") !== "false",
+  };
+  if (id) await prisma.reminderRule.update({ where: { id }, data });
+  else await prisma.reminderRule.create({ data });
+  revalidatePath("/settings/reminders");
+  revalidatePath("/reminders");
+}
+
+export async function deleteReminderRule(f: FormData) {
+  const id = str(f, "id")!;
+  await prisma.reminder.updateMany({ where: { ruleId: id, status: "PENDING" }, data: { status: "CANCELLED" } });
+  await prisma.reminderRule.delete({ where: { id } });
+  revalidatePath("/settings/reminders");
+  revalidatePath("/reminders");
 }

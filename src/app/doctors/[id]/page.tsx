@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { fmtDate, minutesToHHMM, todayString } from "@/lib/time";
 import { Card, Empty, Field, PageHeader } from "@/components/ui";
 import { DoctorForm } from "@/components/doctor-form";
-import { HoursForm } from "@/components/hours-form";
+import { ScheduleEditor } from "@/components/schedule-editor";
 import { addTimeOff, deleteTimeOff } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
@@ -28,7 +28,7 @@ export default async function DoctorPage({ params }: { params: { id: string } })
       <PageHeader title={doctor.name} subtitle={doctor.specialty} />
       <div className="grid gap-6 xl:grid-cols-5">
         <Card title="Weekly working hours" className="xl:col-span-3">
-          <HoursForm
+          <ScheduleEditor
             doctorId={doctor.id}
             hours={doctor.workingHours.map((h) => ({ dayOfWeek: h.dayOfWeek, start: minutesToHHMM(h.startMinute), end: minutesToHHMM(h.endMinute) }))}
           />
