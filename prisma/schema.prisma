@@ -1,0 +1,324 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PatientStatus {
+  LEAD
+  NEW
+  ACTIVE
+  NEEDS_FOLLOW_UP
+  INACTIVE
+}
+
+enum Channel {
+  SMS
+  WHATSAPP
+  EMAIL
+  CALL
+}
+
+enum AppointmentStatus {
+  HELD // temporarily reserved while the voice agent confirms with the caller
+  SCHEDULED
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum BookingSource {
+  STAFF
+  VOICE_AI
+  ONLINE
+}
+
+enum TreatmentStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum ReminderTrigger {
+  AFTER_TREATMENT
+  BEFORE_APPOINTMENT
+  AFTER_MISSED
+}
+
+enum ReminderStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
+  CANCELLED
+}
+
+enum CallDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum CallOutcome {
+  BOOKED
+  RESCHEDULED
+  CANCELLED
+  ENQUIRY
+  TRANSFERRED
+  EMERGENCY
+  MISSED
+  OTHER
+}
+
+enum TaskPriority {
+  LOW
+  NORMAL
+  URGENT
+}
+
+enum UserRole {
+  ADMIN
+  DOCTOR
+  RECEPTIONIST
+}
+
+model Doctor {
+  id           String            @id @default(cuid())
+  name         String
+  specialty    String
+  email        String?
+  phone        String?
+  color        String            @default("#14b8a6")
+  active       Boolean           @default(true)
+  workingHours WorkingHours[]
+  timeOff      TimeOff[]
+  treatments   TreatmentType[]
+  appointments Appointment[]
+  records      TreatmentRecord[]
+  waitlist     Waitlist[]
+  createdAt    DateTime          @default(now())
+}
+
+/// One working block on a weekday. Several blocks per day model breaks (e.g. 9-13 and 14-18).
+model WorkingHours {
+  id          String @id @default(cuid())
+  doctorId    String
+  doctor      Doctor @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  dayOfWeek   Int // 0 = Sunday ... 6 = Saturday
+  startMinute Int // minutes from midnight, clinic time
+  endMinute   Int
+
+  @@index([doctorId, dayOfWeek])
+}
+
+model TimeOff {
+  id       String   @id @default(cuid())
+  doctorId String
+  doctor   Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  start    DateTime
+  end      DateTime
+  reason   String?
+
+  @@index([doctorId, start])
+}
+
+model TreatmentType {
+  id              String            @id @default(cuid())
+  name            String            @unique
+  durationMinutes Int
+  bufferMinutes   Int               @default(0)
+  price           Int               @default(0)
+  color           String            @default("#6366f1")
+  doctors         Doctor[]
+  appointments    Appointment[]
+  records         TreatmentRecord[]
+  reminderRules   ReminderRule[]
+  waitlist        Waitlist[]
+}
+
+model Patient {
+  id               String            @id @default(cuid())
+  firstName        String
+  lastName         String            @default("")
+  phone            String            @unique
+  email            String?
+  dateOfBirth      DateTime?
+  gender           String?
+  address          String?
+  medicalAlerts    String?
+  allergies        String?
+  insurance        String?
+  language         String            @default("English")
+  preferredChannel Channel           @default(WHATSAPP)
+  status           PatientStatus     @default(NEW)
+  tags             String[]
+  notes            String?
+  optOut           Boolean           @default(false)
+  appointments     Appointment[]
+  records          TreatmentRecord[]
+  reminders        Reminder[]
+  calls            CallLog[]
+  timelineNotes    Note[]
+  tasks            Task[]
+  waitlist         Waitlist[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([lastName, firstName])
+}
+
+model Appointment {
+  id              String            @id @default(cuid())
+  patientId       String
+  patient         Patient           @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctorId        String
+  doctor          Doctor            @relation(fields: [doctorId], references: [id])
+  treatmentTypeId String
+  treatmentType   TreatmentType     @relation(fields: [treatmentTypeId], references: [id])
+  start           DateTime
+  end             DateTime // includes the treatment's buffer time
+  status          AppointmentStatus @default(SCHEDULED)
+  source          BookingSource     @default(STAFF)
+  holdExpiresAt   DateTime?
+  notes           String?
+  reminders       Reminder[]
+  record          TreatmentRecord?
+  createdAt       DateTime          @default(now())
+
+  @@index([doctorId, start])
+  @@index([patientId, start])
+}
+
+model TreatmentRecord {
+  id              String          @id @default(cuid())
+  patientId       String
+  patient         Patient         @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctorId        String
+  doctor          Doctor          @relation(fields: [doctorId], references: [id])
+  treatmentTypeId String
+  treatmentType   TreatmentType   @relation(fields: [treatmentTypeId], references: [id])
+  appointmentId   String?         @unique
+  appointment     Appointment?    @relation(fields: [appointmentId], references: [id])
+  status          TreatmentStatus @default(COMPLETED)
+  performedAt     DateTime        @default(now())
+  teeth           String?
+  notes           String?
+  cost            Int             @default(0)
+  reminders       Reminder[]
+}
+
+/// "X days after <treatment>, send <message> via <channel>"
+model ReminderRule {
+  id              String          @id @default(cuid())
+  name            String
+  trigger         ReminderTrigger
+  treatmentTypeId String? // null = any treatment
+  treatmentType   TreatmentType?  @relation(fields: [treatmentTypeId], references: [id])
+  offsetDays      Int             @default(0)
+  offsetHours     Int             @default(0)
+  channel         Channel         @default(WHATSAPP)
+  template        String
+  active          Boolean         @default(true)
+  reminders       Reminder[]
+  createdAt       DateTime        @default(now())
+}
+
+model Reminder {
+  id                String           @id @default(cuid())
+  patientId         String
+  patient           Patient          @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  ruleId            String?
+  rule              ReminderRule?    @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+  appointmentId     String?
+  appointment       Appointment?     @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  treatmentRecordId String?
+  treatmentRecord   TreatmentRecord? @relation(fields: [treatmentRecordId], references: [id], onDelete: SetNull)
+  channel           Channel
+  scheduledFor      DateTime
+  status            ReminderStatus   @default(PENDING)
+  message           String?
+  sentAt            DateTime?
+  error             String?
+  dedupeKey         String?          @unique
+  createdAt         DateTime         @default(now())
+
+  @@index([status, scheduledFor])
+}
+
+model CallLog {
+  id             String        @id @default(cuid())
+  providerCallId String?       @unique
+  patientId      String?
+  patient        Patient?      @relation(fields: [patientId], references: [id], onDelete: SetNull)
+  phone          String
+  direction      CallDirection @default(INBOUND)
+  outcome        CallOutcome   @default(OTHER)
+  startedAt      DateTime      @default(now())
+  durationSec    Int           @default(0)
+  summary        String?
+  transcript     String?
+  recordingUrl   String?
+}
+
+model Note {
+  id        String   @id @default(cuid())
+  patientId String
+  patient   Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  body      String
+  author    String   @default("Staff")
+  createdAt DateTime @default(now())
+}
+
+model Task {
+  id        String       @id @default(cuid())
+  title     String
+  patientId String?
+  patient   Patient?     @relation(fields: [patientId], references: [id], onDelete: SetNull)
+  priority  TaskPriority @default(NORMAL)
+  dueAt     DateTime?
+  done      Boolean      @default(false)
+  createdAt DateTime     @default(now())
+}
+
+model User {
+  id           String     @id @default(cuid())
+  name         String
+  email        String     @unique
+  passwordHash String
+  role         UserRole   @default(RECEPTIONIST)
+  active       Boolean    @default(true)
+  auditLogs    AuditLog[]
+  createdAt    DateTime   @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  action    String
+  entity    String
+  entityId  String?
+  detail    String?
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([entity, entityId])
+}
+
+model Waitlist {
+  id              String        @id @default(cuid())
+  patientId       String
+  patient         Patient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  treatmentTypeId String
+  treatmentType   TreatmentType @relation(fields: [treatmentTypeId], references: [id])
+  doctorId        String?
+  doctor          Doctor?       @relation(fields: [doctorId], references: [id])
+  notes           String?
+  notified        Boolean       @default(false)
+  createdAt       DateTime      @default(now())
+
+  @@index([treatmentTypeId, createdAt])
+}
