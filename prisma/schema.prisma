@@ -47,6 +47,7 @@ enum ReminderTrigger {
   AFTER_TREATMENT
   BEFORE_APPOINTMENT
   AFTER_MISSED
+  AFTER_COMPLETED // fires after a visit is marked COMPLETED (e.g. Google review request)
 }
 
 enum ReminderStatus {
@@ -132,6 +133,7 @@ model TreatmentType {
   bufferMinutes   Int               @default(0)
   price           Int               @default(0)
   color           String            @default("#6366f1")
+  reviewLink      String?           // e.g. Google Maps review URL for this treatment
   doctors         Doctor[]
   appointments    Appointment[]
   records         TreatmentRecord[]
@@ -321,4 +323,18 @@ model Waitlist {
   createdAt       DateTime      @default(now())
 
   @@index([treatmentTypeId, createdAt])
+}
+
+/// Logs inbound SMS/WhatsApp replies from patients (e.g. YES, RESCHEDULE).
+model InboundMessage {
+  id          String   @id @default(cuid())
+  from        String   // patient phone number
+  body        String
+  channel     Channel  @default(SMS)
+  intent      String?  // CONFIRM | RESCHEDULE | CANCEL | UNKNOWN — parsed from body
+  handled     Boolean  @default(false)
+  rawPayload  Json?
+  createdAt   DateTime @default(now())
+
+  @@index([from, createdAt])
 }
