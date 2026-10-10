@@ -5,7 +5,7 @@ import { addDays, clinicDateAt, clinicMinuteOfDay, dayOfWeek, fmt, fmtTime, minu
 import { cn, fullName } from "@/lib/utils";
 import { PageHeader } from "@/components/ui";
 import { AppointmentBadge } from "@/components/badges";
-import { updateAppointmentStatus } from "../actions";
+import { DayGrid } from "./DayGrid";
 
 export const dynamic = "force-dynamic";
 
@@ -144,7 +144,35 @@ export default async function CalendarPage({ searchParams }: { searchParams: { d
   const first = Math.floor(Math.min(8 * 60, ...allBlocks.map((b) => b.startMinute), ...apptMinutes) / 60);
   const last = Math.ceil(Math.max(19 * 60, ...allBlocks.map((b) => b.endMinute), ...apptMinutes) / 60);
   const hours = Array.from({ length: last - first }, (_, i) => first + i);
-  const top = (min: number) => ((min - first * 60) / 60) * HOUR_PX;
+  const topPx = (min: number) => ((min - first * 60) / 60) * HOUR_PX;
+
+  // Serialise doctors for the client component (no Date objects)
+  const dayDoctors = doctors.map((d) => ({
+    id: d.id,
+    name: d.name,
+    color: d.color,
+    specialty: d.specialty,
+    workingHours: d.workingHours.map((w) => ({ id: w.id, startMinute: w.startMinute, endMinute: w.endMinute })),
+    timeOff: d.timeOff.map((t) => ({ id: t.id, reason: t.reason })),
+    appointments: d.appointments.map((a) => ({
+      id: a.id,
+      startMin: clinicMinuteOfDay(a.start),
+      endMin: clinicMinuteOfDay(a.end),
+      startIso: a.start.toISOString(),
+      status: a.status,
+      source: a.source,
+      patientId: a.patientId,
+      patientName: fullName(a.patient),
+      patientPhone: a.patient.phone,
+      patientAlerts: a.patient.medicalAlerts,
+      treatmentName: a.treatmentType.name,
+      treatmentColor: a.treatmentType.color,
+      startLabel: fmtTime(a.start),
+      endLabel: fmtTime(new Date(a.end.getTime() - a.treatmentType.bufferMinutes * 60_000)),
+      notes: a.notes,
+      bufferMinutes: a.treatmentType.bufferMinutes,
+    })),
+  }));
 
   return (
     <>
@@ -174,6 +202,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: { d
 
       <div className="card fade-in overflow-x-auto">
         <div className="grid min-w-[720px]" style={{ gridTemplateColumns: `64px repeat(${doctors.length}, minmax(200px, 1fr))` }}>
+          {/* Header row */}
           <div className="border-b border-border" />
           {doctors.map((d) => (
             <div key={d.id} className="flex items-center gap-2 border-b border-l border-border px-4 py-3">
@@ -187,80 +216,21 @@ export default async function CalendarPage({ searchParams }: { searchParams: { d
             </div>
           ))}
 
+          {/* Time ruler */}
           <div className="relative" style={{ height: hours.length * HOUR_PX }}>
             {hours.map((h) => (
-              <div key={h} className="absolute right-2 -translate-y-2 text-[11px] text-muted" style={{ top: top(h * 60) }}>
+              <div key={h} className="absolute right-2 -translate-y-2 text-[11px] text-muted" style={{ top: topPx(h * 60) }}>
                 {minutesToLabel(h * 60).replace(":00", "")}
               </div>
             ))}
           </div>
 
-          {doctors.map((d) => (
-            <div key={d.id} className="relative border-l border-border" style={{ height: hours.length * HOUR_PX }}>
-              {hours.map((h) => (
-                <div key={h} className="absolute inset-x-0 border-t border-border/60" style={{ top: top(h * 60) }} />
-              ))}
-              <div className="absolute inset-0 bg-[repeating-linear-gradient(135deg,transparent,transparent_6px,rgb(var(--surface-2))_6px,rgb(var(--surface-2))_12px)]" />
-              {d.timeOff.length === 0 &&
-                d.workingHours.map((w) => (
-                  <div key={w.id} className="absolute inset-x-0 bg-surface" style={{ top: top(w.startMinute), height: top(w.endMinute) - top(w.startMinute) }} />
-                ))}
-              {d.appointments.map((a) => {
-                const s = clinicMinuteOfDay(a.start);
-                const e = clinicMinuteOfDay(a.end);
-                return (
-                  <details key={a.id} className="group absolute inset-x-1.5" style={{ top: top(s) + 1, height: Math.max(top(e) - top(s) - 2, 28) }}>
-                    <summary
-                      className={cn(
-                        "h-full cursor-pointer list-none overflow-hidden rounded-xl border-l-4 px-2.5 py-1.5 text-xs shadow-sm transition hover:shadow-md",
-                        a.status === "NO_SHOW" && "opacity-60",
-                        a.status === "HELD" && "border-dashed",
-                      )}
-                      style={{ borderColor: a.treatmentType.color, background: `${a.treatmentType.color}1f` }}
-                    >
-                      <div className="flex items-center gap-1 font-semibold">
-                        {a.source === "VOICE_AI" && <Bot className="h-3 w-3 shrink-0" />}
-                        <span className="truncate">{fullName(a.patient)}</span>
-                      </div>
-                      <div className="truncate text-muted">
-                        {fmtTime(a.start)} · {a.treatmentType.name}
-                      </div>
-                    </summary>
-                    <div className="absolute left-0 top-full z-10 mt-1 w-64 rounded-xl border border-border bg-surface p-3 text-xs shadow-xl">
-                      <div className="mb-2 flex items-center justify-between">
-                        <Link href={`/patients/${a.patientId}`} className="font-semibold hover:text-brand">
-                          {fullName(a.patient)}
-                        </Link>
-                        <AppointmentBadge status={a.status} />
-                      </div>
-                      <div className="text-muted">
-                        {fmtTime(a.start)} – {fmtTime(new Date(a.end.getTime() - a.treatmentType.bufferMinutes * 60_000))} · {a.patient.phone}
-                      </div>
-                      {a.notes && <p className="mt-1">{a.notes}</p>}
-                      {a.patient.medicalAlerts && <p className="mt-1 text-rose-500">⚠ {a.patient.medicalAlerts}</p>}
-                      <div className="mt-3 grid grid-cols-2 gap-1.5">
-                        {(["CONFIRMED", "COMPLETED", "NO_SHOW", "CANCELLED"] as const)
-                          .filter((s) => s !== a.status)
-                          .map((s) => (
-                            <form key={s} action={updateAppointmentStatus}>
-                              <input type="hidden" name="id" value={a.id} />
-                              <input type="hidden" name="status" value={s} />
-                              <button className="btn-ghost btn-sm w-full">
-                                {{ CONFIRMED: "Confirm", COMPLETED: "Complete", NO_SHOW: "No-show", CANCELLED: "Cancel" }[s]}
-                              </button>
-                            </form>
-                          ))}
-                      </div>
-                    </div>
-                  </details>
-                );
-              })}
-            </div>
-          ))}
+          {/* Doctor columns — interactive client component */}
+          <DayGrid doctors={dayDoctors} hours={hours} firstHour={first} />
         </div>
       </div>
       <p className="mt-3 text-xs text-muted">
-        Striped areas are outside working hours. <Bot className="inline h-3 w-3" /> marks bookings made by the AI receptionist. Click an appointment to update it.
+        Striped areas are outside working hours. <Bot className="inline h-3 w-3" /> marks bookings made by the AI receptionist. Click an appointment to update its status, or drag it to reschedule.
       </p>
     </>
   );

@@ -1,4 +1,4 @@
-import type { Appointment, Prisma, ReminderRule, TreatmentRecord } from "@prisma/client";
+import type { Appointment, Prisma, ReminderRule, TreatmentRecord, AppointmentStatus } from "@prisma/client";
 import { prisma } from "./prisma";
 import { clinic, QUIET_HOURS } from "./config";
 import { addDays, clinicDateAt, clinicDateString, clinicMinuteOfDay, fmtDate, fmtTime } from "./time";
@@ -114,6 +114,82 @@ export async function cancelPendingAppointmentReminders(appointmentId: string) {
   });
 }
 
+/** Queue "after completed visit" reminders (e.g. Google review requests). */
+export async function scheduleCompletedFollowUps(appt: Appointment) {
+  const rules = await prisma.reminderRule.findMany({
+    where: {
+      active: true,
+      trigger: "AFTER_COMPLETED",
+      OR: [{ treatmentTypeId: null }, { treatmentTypeId: appt.treatmentTypeId }],
+    },
+  });
+  await createReminders(
+    rules.map((rule) => ({
+      rule,
+      scheduledFor: daysAfter(appt.start, rule),
+      patientId: appt.patientId,
+      appointmentId: appt.id,
+      dedupeKey: `rule:${rule.id}:completed:${appt.id}`,
+    })),
+  );
+}
+
+/** Parse and act on an inbound SMS/WhatsApp reply. Returns the detected intent. */
+export async function processInboundReply(
+  from: string,
+  body: string,
+  channel: "SMS" | "WHATSAPP",
+  rawPayload?: Record<string, unknown>,
+): Promise<"CONFIRM" | "RESCHEDULE" | "CANCEL" | "UNKNOWN"> {
+  const normalised = body.trim().toUpperCase();
+  let intent: "CONFIRM" | "RESCHEDULE" | "CANCEL" | "UNKNOWN" = "UNKNOWN";
+
+  if (/^(YES|Y|CONFIRM|OK|OKAY|SI|SÍ|HA|HA|हां|YES PLEASE)/.test(normalised)) intent = "CONFIRM";
+  else if (/^(RESCHEDULE|REBOOK|CHANGE|MOVE|CANCEL AND RESCHEDULE)/.test(normalised)) intent = "RESCHEDULE";
+  else if (/^(NO|CANCEL|STOP|OPTOUT|OPT OUT|UNSUBSCRIBE)/.test(normalised)) intent = "CANCEL";
+
+  await prisma.inboundMessage.create({
+    data: { from, body, channel, intent, handled: false, rawPayload: (rawPayload ?? {}) as Record<string, string> },
+  });
+
+  if (intent === "CONFIRM") {
+    // Confirm the next upcoming SCHEDULED appointment for this patient
+    const patient = await prisma.patient.findUnique({ where: { phone: from } });
+    if (patient) {
+      const appt = await prisma.appointment.findFirst({
+        where: { patientId: patient.id, status: "SCHEDULED", start: { gt: new Date() } },
+        orderBy: { start: "asc" },
+      });
+      if (appt) {
+        await prisma.appointment.update({ where: { id: appt.id }, data: { status: "CONFIRMED" } });
+        await prisma.inboundMessage.updateMany({ where: { from, intent: "CONFIRM", handled: false }, data: { handled: true } });
+      }
+    }
+  } else if (intent === "RESCHEDULE") {
+    // Send a rebook prompt back to the patient
+    const patient = await prisma.patient.findUnique({ where: { phone: from } });
+    if (patient) {
+      const replyBody = `Hi ${patient.firstName}, no problem! Call us at ${clinic.phone} or reply with your preferred date and time and we'll sort it out. – ${clinic.name}`;
+      await sendMessage(channel, from, replyBody).catch(() => null);
+      await prisma.inboundMessage.updateMany({ where: { from, intent: "RESCHEDULE", handled: false }, data: { handled: true } });
+    }
+  } else if (intent === "CANCEL") {
+    // Mark patient as opted out of reminders
+    await prisma.patient.updateMany({ where: { phone: from }, data: { optOut: true } });
+    const patient = await prisma.patient.findUnique({ where: { phone: from } });
+    if (patient) {
+      const replyBody = `You've been unsubscribed from ${clinic.name} messages. Call ${clinic.phone} to re-subscribe anytime. – ${clinic.name}`;
+      await sendMessage(channel, from, replyBody).catch(() => null);
+    }
+    await prisma.inboundMessage.updateMany({ where: { from, intent: "CANCEL", handled: false }, data: { handled: true } });
+  }
+
+  return intent;
+}
+
+// Re-export AppointmentStatus so booking.ts can import it from here without circular deps
+export type { AppointmentStatus };
+
 const dueInclude = {
   patient: true,
   rule: true,
@@ -153,6 +229,7 @@ export async function processDueReminders(now = new Date()) {
 
     const ctx = appt ?? r.treatmentRecord;
     const when = appt?.start ?? r.treatmentRecord?.performedAt;
+    const reviewLink = ctx?.treatmentType && "reviewLink" in ctx.treatmentType ? (ctx.treatmentType as { reviewLink?: string | null }).reviewLink ?? undefined : undefined;
     const templateFallback = renderTemplate(r.rule?.template ?? r.message ?? "", {
       firstName: r.patient.firstName,
       fullName: fullName(r.patient),
@@ -162,6 +239,7 @@ export async function processDueReminders(now = new Date()) {
       treatment: ctx?.treatmentType.name,
       date: when ? fmtDate(when) : undefined,
       time: when ? fmtTime(when) : undefined,
+      reviewLink,
     });
     const message = await generatePersonalisedMessage({
       firstName: r.patient.firstName,

@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { AppointmentStatus, Channel, PatientStatus, ReminderTrigger, TaskPriority } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { BookingError, bookAppointment, setAppointmentStatus } from "@/lib/booking";
+import { BookingError, bookAppointment, rescheduleAppointment, setAppointmentStatus } from "@/lib/booking";
 import { processDueReminders, scheduleTreatmentFollowUps } from "@/lib/reminders";
 import { sendMessage } from "@/lib/messaging";
 import { clinic } from "@/lib/config";
@@ -107,6 +107,45 @@ export async function updateAppointmentStatus(f: FormData) {
   const id = str(f, "id")!;
   await setAppointmentStatus(id, str(f, "status") as AppointmentStatus);
   revalidatePath("/", "layout");
+}
+
+/** Drag-and-drop reschedule: called from the calendar day view client component. */
+export async function dragRescheduleAppointment(id: string, newStartIso: string): Promise<{ error?: string }> {
+  try {
+    await rescheduleAppointment(id, new Date(newStartIso));
+    revalidatePath("/calendar");
+    return {};
+  } catch (e) {
+    if (e instanceof BookingError) return { error: e.message };
+    return { error: "Failed to reschedule." };
+  }
+}
+
+// ---------- Treatment types ----------
+
+export async function saveTreatmentType(f: FormData) {
+  const id = str(f, "id");
+  const data = {
+    name: str(f, "name") ?? "Treatment",
+    durationMinutes: int(f, "durationMinutes") || 30,
+    bufferMinutes: int(f, "bufferMinutes"),
+    price: int(f, "price"),
+    color: str(f, "color") ?? "#6366f1",
+    reviewLink: str(f, "reviewLink") ?? null,
+  };
+  if (id) {
+    await prisma.treatmentType.update({ where: { id }, data });
+  } else {
+    await prisma.treatmentType.create({ data });
+  }
+  revalidatePath("/settings/treatments");
+  revalidatePath("/", "layout");
+}
+
+export async function deleteTreatmentType(f: FormData) {
+  const id = str(f, "id")!;
+  await prisma.treatmentType.delete({ where: { id } }).catch(() => null);
+  revalidatePath("/settings/treatments");
 }
 
 // ---------- Doctors ----------

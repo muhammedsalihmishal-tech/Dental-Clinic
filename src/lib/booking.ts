@@ -8,6 +8,7 @@ import { clinic } from "./config";
 import {
   cancelPendingAppointmentReminders,
   scheduleAppointmentReminders,
+  scheduleCompletedFollowUps,
   scheduleMissedFollowUps,
   scheduleTreatmentFollowUps,
 } from "./reminders";
@@ -161,6 +162,7 @@ export async function setAppointmentStatus(id: string, status: AppointmentStatus
       });
       await scheduleTreatmentFollowUps(record);
     }
+    await scheduleCompletedFollowUps(appt);
     await prisma.patient.update({ where: { id: appt.patientId }, data: { status: "ACTIVE" } });
   }
   if (status === "NO_SHOW") {
