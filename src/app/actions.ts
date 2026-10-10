@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import type { AppointmentStatus, Channel, InvoiceStatus, PatientStatus, ReminderTrigger, TaskPriority } from "@prisma/client";
+import type { AppointmentStatus, Channel, InvoiceStatus, LabOrderStatus, PatientStatus, ReminderTrigger, TaskPriority, TreatmentPlanStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { BookingError, bookAppointment, rescheduleAppointment, setAppointmentStatus } from "@/lib/booking";
 import { processDueReminders, scheduleTreatmentFollowUps } from "@/lib/reminders";
@@ -385,4 +385,142 @@ export async function deleteReminderRule(f: FormData) {
   await prisma.reminderRule.delete({ where: { id } });
   revalidatePath("/settings/reminders");
   revalidatePath("/reminders");
+}
+
+// ---------- Treatment plans ----------
+
+export async function createTreatmentPlan(f: FormData) {
+  const patientId = str(f, "patientId")!;
+  await prisma.treatmentPlan.create({
+    data: {
+      patientId,
+      title: str(f, "title") ?? "New plan",
+      notes: str(f, "notes") ?? null,
+    },
+  });
+  revalidatePath("/plans");
+  revalidatePath(`/patients/${patientId}`);
+}
+
+export async function updateTreatmentPlan(f: FormData) {
+  const id = str(f, "id")!;
+  const plan = await prisma.treatmentPlan.update({
+    where: { id },
+    data: {
+      title: str(f, "title") ?? undefined,
+      notes: str(f, "notes") ?? null,
+      status: (str(f, "status") as TreatmentPlanStatus) ?? undefined,
+    },
+  });
+  revalidatePath("/plans");
+  revalidatePath(`/plans/${id}`);
+  revalidatePath(`/patients/${plan.patientId}`);
+}
+
+export async function assignRecordToPlan(f: FormData) {
+  const planId = str(f, "planId")!;
+  const recordId = str(f, "recordId")!;
+  await prisma.treatmentRecord.update({ where: { id: recordId }, data: { planId } });
+  revalidatePath(`/plans/${planId}`);
+}
+
+// ---------- Recall ----------
+
+export async function sendRecallSms(f: FormData) {
+  const patientId = str(f, "patientId")!;
+  const patient = await prisma.patient.findUniqueOrThrow({ where: { id: patientId } });
+  if (patient.optOut) return;
+  const body = `Hi ${patient.firstName}, it's time for your routine dental check-up at ${clinic.name}! Call us at ${clinic.phone} to book. – ${clinic.name}`;
+  await sendMessage(patient.preferredChannel as "SMS" | "WHATSAPP", patient.phone, body).catch(() => null);
+  revalidatePath("/recall");
+}
+
+// ---------- Campaigns ----------
+
+export async function createCampaign(f: FormData) {
+  const statuses = f.getAll("statuses").map(String).filter(Boolean);
+  const tags = (str(f, "tags") ?? "").split(",").map((t) => t.trim()).filter(Boolean);
+  const lastSeenBeforeDays = int(f, "lastSeenBeforeDays") || undefined;
+  await prisma.campaign.create({
+    data: {
+      name: str(f, "name") ?? "Campaign",
+      message: str(f, "message") ?? "",
+      channel: (str(f, "channel") ?? "WHATSAPP") as Channel,
+      segment: { statuses: statuses.length ? statuses : undefined, tags: tags.length ? tags : undefined, lastSeenBeforeDays },
+    },
+  });
+  revalidatePath("/campaigns");
+}
+
+export async function sendCampaign(f: FormData) {
+  const id = str(f, "id")!;
+  const campaign = await prisma.campaign.findUniqueOrThrow({ where: { id } });
+  if (campaign.status !== "DRAFT") return;
+
+  const seg = campaign.segment as { statuses?: string[]; tags?: string[]; lastSeenBeforeDays?: number };
+  const where: Record<string, unknown> = { optOut: false };
+  if (seg.statuses?.length) where.status = { in: seg.statuses };
+  if (seg.tags?.length) where.tags = { hasSome: seg.tags };
+
+  const patients = await prisma.patient.findMany({
+    where,
+    select: { id: true, firstName: true, phone: true, preferredChannel: true },
+  });
+
+  let filtered = patients;
+  if (seg.lastSeenBeforeDays) {
+    const cutoff = new Date(Date.now() - seg.lastSeenBeforeDays * 86400000);
+    const recentIds = await prisma.appointment.findMany({
+      where: { patientId: { in: patients.map((p) => p.id) }, start: { gte: cutoff }, status: "COMPLETED" },
+      select: { patientId: true },
+      distinct: ["patientId"],
+    });
+    const recentSet = new Set(recentIds.map((a) => a.patientId));
+    filtered = patients.filter((p) => !recentSet.has(p.id));
+  }
+
+  await prisma.campaign.update({ where: { id }, data: { status: "SENDING" } });
+
+  let sent = 0, fail = 0;
+  for (const p of filtered) {
+    const body = campaign.message
+      .replace(/\{\{name\}\}/g, p.firstName)
+      .replace(/\{\{clinic\}\}/g, clinic.name)
+      .replace(/\{\{phone\}\}/g, clinic.phone);
+    const result = await sendMessage(p.preferredChannel as "SMS" | "WHATSAPP", p.phone, body).catch(() => ({ ok: false }));
+    await prisma.campaignMessage.create({ data: { campaignId: id, patientId: p.id, sent: (result as { ok: boolean }).ok, error: (result as { ok: boolean }).ok ? null : "Failed" } });
+    if ((result as { ok: boolean }).ok) sent++; else fail++;
+  }
+
+  await prisma.campaign.update({ where: { id }, data: { status: "SENT", sentAt: new Date(), sentCount: sent, failCount: fail } });
+  revalidatePath("/campaigns");
+}
+
+// ---------- Lab orders ----------
+
+export async function createLabOrder(f: FormData) {
+  const patientId = str(f, "patientId")!;
+  await prisma.labOrder.create({
+    data: {
+      patientId,
+      treatmentRecordId: str(f, "treatmentRecordId") ?? null,
+      labName: str(f, "labName") ?? "Lab",
+      material: str(f, "material") ?? null,
+      shade: str(f, "shade") ?? null,
+      dueAt: str(f, "dueAt") ? new Date(`${str(f, "dueAt")}T12:00:00Z`) : null,
+      notes: str(f, "notes") ?? null,
+    },
+  });
+  revalidatePath("/lab");
+  revalidatePath(`/patients/${patientId}`);
+}
+
+export async function updateLabOrderStatus(f: FormData) {
+  const id = str(f, "id")!;
+  const status = str(f, "status") as LabOrderStatus;
+  await prisma.labOrder.update({
+    where: { id },
+    data: { status, receivedAt: status === "RECEIVED" ? new Date() : undefined },
+  });
+  revalidatePath("/lab");
 }
