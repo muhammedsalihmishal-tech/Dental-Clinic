@@ -12,7 +12,7 @@ export default async function TreatmentsPage() {
     <>
       <PageHeader
         title="Treatment types"
-        subtitle="Manage durations, pricing, colours and Google review links."
+        subtitle="Manage durations, pricing, colours, review links and recall schedules."
       />
 
       <div className="grid gap-6 xl:grid-cols-3">
@@ -41,6 +41,17 @@ export default async function TreatmentsPage() {
                       <span className="text-xs text-muted">{t.color}</span>
                     </div>
                   </Field>
+                  <Field label="Recall interval (months)" className="col-span-2">
+                    <input
+                      name="recallMonths"
+                      type="number"
+                      min={1}
+                      max={36}
+                      defaultValue={t.recallMonths ?? ""}
+                      placeholder="e.g. 6 — leave blank to skip"
+                      className="input"
+                    />
+                  </Field>
                   <Field label="Google review link" className="col-span-2">
                     <input name="reviewLink" type="url" placeholder="https://g.page/r/..." defaultValue={t.reviewLink ?? ""} className="input" />
                   </Field>
@@ -67,6 +78,9 @@ export default async function TreatmentsPage() {
             <Field label="Price (₹)"><input name="price" type="number" min={0} defaultValue={0} className="input" /></Field>
             <Field label="Colour">
               <input name="color" type="color" defaultValue="#6366f1" className="h-9 w-full cursor-pointer rounded border border-border bg-surface p-1" />
+            </Field>
+            <Field label="Recall interval (months)">
+              <input name="recallMonths" type="number" min={1} max={36} placeholder="e.g. 6 — leave blank to skip" className="input" />
             </Field>
             <Field label="Google review link">
               <input name="reviewLink" type="url" placeholder="https://g.page/r/..." className="input" />
