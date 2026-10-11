@@ -9,20 +9,26 @@ import { CallBadge } from "@/components/badges";
 export const dynamic = "force-dynamic";
 
 export default async function CallsPage() {
-  const [calls, total, booked, emergencies] = await Promise.all([
+  const [calls, total, booked, emergencies, inbound, durAgg] = await Promise.all([
     prisma.callLog.findMany({ include: { patient: true }, orderBy: { startedAt: "desc" }, take: 100 }),
     prisma.callLog.count(),
     prisma.callLog.count({ where: { outcome: { in: ["BOOKED", "RESCHEDULED"] } } }),
     prisma.callLog.count({ where: { outcome: "EMERGENCY" } }),
+    prisma.callLog.count({ where: { direction: "INBOUND" } }),
+    prisma.callLog.aggregate({ _avg: { durationSec: true } }),
   ]);
   const rate = total ? Math.round((booked / total) * 100) : 0;
+  const outbound = total - inbound;
+  const avgSec = Math.round(durAgg._avg.durationSec ?? 0);
+  const avgLabel = avgSec > 0 ? `${Math.floor(avgSec / 60)}m ${avgSec % 60}s` : "—";
 
   return (
     <>
       <PageHeader title="AI receptionist calls" subtitle="Every call the voice agent handled, with summary and transcript." />
-      <div className="mb-6 grid gap-4 sm:grid-cols-3">
-        <StatCard label="Calls handled" value={total} icon={Bot} tone="indigo" />
+      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard label="Calls handled" value={total} hint={`${inbound} inbound · ${outbound} outbound`} icon={Bot} tone="indigo" />
         <StatCard label="Booking conversion" value={`${rate}%`} hint={`${booked} booked or rescheduled`} icon={PhoneIncoming} />
+        <StatCard label="Avg call duration" value={avgLabel} icon={PhoneOutgoing} />
         <StatCard label="Emergencies escalated" value={emergencies} icon={PhoneOutgoing} tone="rose" />
       </div>
       <Card>
