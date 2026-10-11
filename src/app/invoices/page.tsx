@@ -1,131 +1,174 @@
 import Link from "next/link";
-import { FileText, Send, CheckCircle, XCircle } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock, CreditCard } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { fmtDate, fmtDateTime } from "@/lib/time";
 import { formatMoney, fullName } from "@/lib/utils";
-import { Badge, Card, Empty, Field, PageHeader } from "@/components/ui";
-import { createInvoice, updateInvoiceStatus, sendInvoiceMessage } from "../actions";
+import { Badge, Card, Empty, PageHeader, StatCard } from "@/components/ui";
+import { updateInvoiceStatus, sendInvoiceMessage } from "@/app/actions";
+import type { InvoiceStatus } from "@prisma/client";
+import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
-const STATUS_COLOR: Record<string, string> = {
-  DRAFT: "bg-muted/30 text-muted",
-  SENT: "bg-indigo-500/15 text-indigo-600 dark:text-indigo-400",
-  PAID: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
-  VOID: "bg-rose-500/15 text-rose-500 line-through",
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+const STATUS_TONE: Record<InvoiceStatus, "gray" | "violet" | "emerald" | "rose"> = {
+  DRAFT: "gray",
+  SENT: "violet",
+  PAID: "emerald",
+  VOID: "gray",
 };
 
-export default async function InvoicesPage({ searchParams }: { searchParams: { patient?: string } }) {
-  const [invoices, patients, treatments, records] = await Promise.all([
+const STATUS_LABEL: Record<InvoiceStatus, string> = {
+  DRAFT: "Draft",
+  SENT: "Sent",
+  PAID: "Paid",
+  VOID: "Void",
+};
+
+type Filter = "all" | "outstanding" | "overdue" | "paid";
+
+export default async function InvoicesPage({ searchParams }: { searchParams: { filter?: string } }) {
+  const filter = (searchParams.filter ?? "all") as Filter;
+  const now = new Date();
+  const overdueThreshold = new Date(now.getTime() - THIRTY_DAYS_MS);
+
+  const [allInvoices, totalOutstanding, totalPaidThisMonth, overdueCount] = await Promise.all([
     prisma.invoice.findMany({
-      where: searchParams.patient ? { patientId: searchParams.patient } : undefined,
-      include: {
-        patient: true,
-        treatmentRecord: { include: { treatmentType: true, doctor: true } },
-      },
-      orderBy: { createdAt: "desc" },
-      take: 100,
+      include: { patient: true },
+      orderBy: { issuedAt: "desc" },
+      take: 200,
     }),
-    prisma.patient.findMany({ orderBy: [{ lastName: "asc" }, { firstName: "asc" }], select: { id: true, firstName: true, lastName: true } }),
-    prisma.treatmentType.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
-    prisma.treatmentRecord.findMany({
-      where: { invoice: null },
-      include: { patient: { select: { id: true, firstName: true, lastName: true } }, treatmentType: true },
-      orderBy: { performedAt: "desc" },
-      take: 100,
+    prisma.invoice.aggregate({
+      where: { status: { in: ["DRAFT", "SENT"] } },
+      _sum: { amount: true },
+    }),
+    prisma.invoice.aggregate({
+      where: {
+        status: "PAID",
+        paidAt: { gte: new Date(now.getFullYear(), now.getMonth(), 1) },
+      },
+      _sum: { amount: true },
+    }),
+    prisma.invoice.count({
+      where: { status: "SENT", issuedAt: { lt: overdueThreshold } },
     }),
   ]);
 
-  const unpaid = invoices.filter((i) => i.status !== "PAID" && i.status !== "VOID");
-  const totalUnpaid = unpaid.reduce((s, i) => s + i.amount, 0);
+  const filtered = allInvoices.filter((inv) => {
+    if (filter === "outstanding") return inv.status === "DRAFT" || inv.status === "SENT";
+    if (filter === "overdue") return inv.status === "SENT" && inv.issuedAt < overdueThreshold;
+    if (filter === "paid") return inv.status === "PAID";
+    return true;
+  });
+
+  const outstanding = (totalOutstanding._sum.amount ?? 0);
+  const paidThisMonth = (totalPaidThisMonth._sum.amount ?? 0);
+
+  const tabs: { key: Filter; label: string }[] = [
+    { key: "all", label: "All" },
+    { key: "outstanding", label: "Outstanding" },
+    { key: "overdue", label: "Overdue" },
+    { key: "paid", label: "Paid" },
+  ];
 
   return (
     <>
-      <PageHeader
-        title="Invoices"
-        subtitle={`${unpaid.length} unpaid · ${formatMoney(totalUnpaid)} outstanding`}
-      />
+      <PageHeader title="Invoices" subtitle="All patient invoices and payment status." />
 
-      <div className="grid gap-6 xl:grid-cols-3">
-        <div className="space-y-3 xl:col-span-2">
-          {invoices.length === 0 && <Empty>No invoices yet.</Empty>}
-          {invoices.map((inv) => (
-            <div key={inv.id} className="card fade-in p-4">
-              <div className="flex flex-wrap items-start gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <Link href={`/invoices/${inv.id}`} className="font-mono text-sm font-semibold hover:text-brand">{inv.number}</Link>
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLOR[inv.status]}`}>{inv.status}</span>
-                  </div>
-                  <div className="mt-1 text-sm">
-                    <Link href={`/patients/${inv.patient.id}`} className="font-medium hover:underline">{fullName(inv.patient)}</Link>
-                    {inv.treatmentRecord && (
-                      <span className="text-muted"> · {inv.treatmentRecord.treatmentType.name} with {inv.treatmentRecord.doctor.name}</span>
-                    )}
-                  </div>
-                  <div className="mt-0.5 text-xs text-muted">Issued {fmtDate(inv.issuedAt)}{inv.paidAt ? ` · Paid ${fmtDate(inv.paidAt)}` : ""}</div>
-                  {inv.notes && <div className="mt-1 text-xs text-muted">{inv.notes}</div>}
-                </div>
-                <div className="text-right shrink-0">
-                  <div className="text-lg font-semibold">{formatMoney(inv.amount)}</div>
-                  <div className="mt-1 flex gap-1 justify-end">
-                    {inv.status === "DRAFT" && (
-                      <form action={sendInvoiceMessage}>
-                        <input type="hidden" name="id" value={inv.id} />
-                        <button className="btn-ghost btn-sm gap-1" title="Send to patient"><Send className="h-3.5 w-3.5" />Send</button>
-                      </form>
-                    )}
-                    {(inv.status === "DRAFT" || inv.status === "SENT") && (
-                      <form action={updateInvoiceStatus}>
-                        <input type="hidden" name="id" value={inv.id} />
-                        <input type="hidden" name="status" value="PAID" />
-                        <button className="btn-ghost btn-sm gap-1 text-emerald-600" title="Mark paid"><CheckCircle className="h-3.5 w-3.5" />Paid</button>
-                      </form>
-                    )}
-                    {inv.status !== "VOID" && inv.status !== "PAID" && (
-                      <form action={updateInvoiceStatus}>
-                        <input type="hidden" name="id" value={inv.id} />
-                        <input type="hidden" name="status" value="VOID" />
-                        <button className="btn-ghost btn-sm gap-1 text-rose-500" title="Void"><XCircle className="h-3.5 w-3.5" />Void</button>
-                      </form>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
+      <div className="mb-6 grid gap-4 sm:grid-cols-3">
+        <StatCard label="Outstanding" value={formatMoney(outstanding)} hint="Draft + sent invoices" icon={Clock} tone="violet" />
+        <StatCard label="Paid this month" value={formatMoney(paidThisMonth)} icon={CheckCircle2} tone="emerald" />
+        <StatCard label="Overdue (30+ days)" value={overdueCount} hint="Sent, not yet paid" icon={AlertCircle} tone={overdueCount > 0 ? "rose" : "gray"} />
+      </div>
+
+      <Card>
+        {/* Filter tabs */}
+        <div className="flex gap-1 border-b border-border px-4 pt-3 pb-0">
+          {tabs.map((t) => (
+            <Link
+              key={t.key}
+              href={`/invoices?filter=${t.key}`}
+              className={cn(
+                "rounded-t-lg px-4 py-2 text-sm font-medium transition",
+                filter === t.key
+                  ? "border-b-2 border-brand text-brand"
+                  : "text-muted hover:text-fg",
+              )}
+            >
+              {t.label}
+            </Link>
           ))}
         </div>
 
-        <Card title="New invoice">
-          <form action={createInvoice} className="space-y-3 p-5">
-            <Field label="Patient">
-              <select name="patientId" required className="input">
-                <option value="">Select patient…</option>
-                {patients.map((p) => (
-                  <option key={p.id} value={p.id}>{fullName(p)}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Link to treatment record (optional)">
-              <select name="treatmentRecordId" className="input">
-                <option value="">— none —</option>
-                {records.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {fullName(r.patient)} · {r.treatmentType.name} · {fmtDate(r.performedAt)}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Amount (₹)">
-              <input name="amount" type="number" min={0} required className="input" placeholder="0" />
-            </Field>
-            <Field label="Notes (optional)">
-              <input name="notes" className="input" placeholder="e.g. includes X-ray" />
-            </Field>
-            <button className="btn-primary w-full">Create invoice</button>
-          </form>
-        </Card>
-      </div>
+        {filtered.length === 0 ? (
+          <Empty>No invoices match this filter.</Empty>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-xs font-semibold uppercase tracking-wider text-muted">
+                  <th className="px-5 py-3">Invoice</th>
+                  <th className="px-5 py-3">Patient</th>
+                  <th className="px-5 py-3">Amount</th>
+                  <th className="px-5 py-3">Status</th>
+                  <th className="px-5 py-3">Issued</th>
+                  <th className="px-5 py-3">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {filtered.map((inv) => {
+                  const isOverdue = inv.status === "SENT" && inv.issuedAt < overdueThreshold;
+                  return (
+                    <tr key={inv.id} className="hover:bg-surface-2/40">
+                      <td className="px-5 py-3 font-mono text-xs font-semibold tabular-nums">
+                        {inv.number}
+                      </td>
+                      <td className="px-5 py-3">
+                        <Link href={`/patients/${inv.patientId}`} className="hover:text-brand font-medium">
+                          {fullName(inv.patient)}
+                        </Link>
+                      </td>
+                      <td className="px-5 py-3 tabular-nums">{formatMoney(inv.amount)}</td>
+                      <td className="px-5 py-3">
+                        <div className="flex items-center gap-2">
+                          <Badge tone={STATUS_TONE[inv.status]}>{STATUS_LABEL[inv.status]}</Badge>
+                          {isOverdue && <Badge tone="rose">Overdue</Badge>}
+                        </div>
+                      </td>
+                      <td className="px-5 py-3 text-muted">{fmtDate(inv.issuedAt)}</td>
+                      <td className="px-5 py-3">
+                        <div className="flex gap-1">
+                          {inv.status === "DRAFT" && (
+                            <form action={sendInvoiceMessage}>
+                              <input type="hidden" name="id" value={inv.id} />
+                              <button className="btn-ghost btn-sm text-xs">Send</button>
+                            </form>
+                          )}
+                          {inv.status === "SENT" && (
+                            <form action={updateInvoiceStatus}>
+                              <input type="hidden" name="id" value={inv.id} />
+                              <input type="hidden" name="status" value="PAID" />
+                              <button className="btn-ghost btn-sm text-xs text-emerald-600">Mark paid</button>
+                            </form>
+                          )}
+                          {(inv.status === "DRAFT" || inv.status === "SENT") && (
+                            <form action={updateInvoiceStatus}>
+                              <input type="hidden" name="id" value={inv.id} />
+                              <input type="hidden" name="status" value="VOID" />
+                              <button className="btn-ghost btn-sm text-xs text-muted">Void</button>
+                            </form>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
     </>
   );
 }
