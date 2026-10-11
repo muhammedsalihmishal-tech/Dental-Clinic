@@ -195,7 +195,14 @@ export default async function PatientPage({ params }: { params: { id: string } }
                   <li key={a.id} className="px-5 py-3">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-sm font-medium">{fmtDateTime(a.start)}</span>
-                      <AppointmentBadge status={a.status} />
+                      <div className="flex items-center gap-2">
+                        <AppointmentBadge status={a.status} />
+                        {["SCHEDULED", "CONFIRMED"].includes(a.status) && (
+                          <Link href={`/appointments/${a.id}`} className="text-xs text-brand hover:underline">
+                            Reschedule
+                          </Link>
+                        )}
+                      </div>
                     </div>
                     <div className="mt-0.5 flex items-center gap-1 text-xs text-muted">
                       {a.source === "VOICE_AI" && <Bot className="h-3 w-3" />} {a.treatmentType.name} · {a.doctor.name}

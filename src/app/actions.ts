@@ -127,6 +127,22 @@ export async function dragRescheduleAppointment(id: string, newStartIso: string)
   }
 }
 
+/** Form-based reschedule: called from the appointment detail page. */
+export async function rescheduleAppointmentAction(_prev: ActionState, f: FormData): Promise<ActionState> {
+  const id = str(f, "id");
+  const start = str(f, "start");
+  const doctorId = str(f, "doctorId");
+  if (!id || !start) return { error: "Missing required fields." };
+  try {
+    const appt = await rescheduleAppointment(id, new Date(start), doctorId);
+    revalidatePath("/", "layout");
+    redirect(`/appointments/${appt.id}`);
+  } catch (e) {
+    if (e instanceof BookingError) return { error: e.message };
+    return { error: "Failed to reschedule." };
+  }
+}
+
 // ---------- Treatment types ----------
 
 export async function saveTreatmentType(f: FormData) {
