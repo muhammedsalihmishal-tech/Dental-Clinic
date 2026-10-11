@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { PatientStatus, Prisma } from "@prisma/client";
-import { Plus } from "lucide-react";
+import { Download, Plus } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { fmtDate } from "@/lib/time";
 import { cn, fullName, titleCase } from "@/lib/utils";
@@ -57,9 +57,18 @@ export default async function PatientsPage({ searchParams }: { searchParams: { q
         title="Patients"
         subtitle={q ? `Results for "${q}"` : "Every patient, their history and what's next."}
         actions={
-          <Link href="/patients/new" className="btn-primary">
-            <Plus className="h-4 w-4" /> New patient
-          </Link>
+          <div className="flex gap-2">
+            <a
+              href={`/api/patients/export?${new URLSearchParams({ ...(q ? { q } : {}), ...(status ? { status } : {}) })}`}
+              className="btn-ghost"
+              download
+            >
+              <Download className="h-4 w-4" /> Export CSV
+            </a>
+            <Link href="/patients/new" className="btn-primary">
+              <Plus className="h-4 w-4" /> New patient
+            </Link>
+          </div>
         }
       />
       <div className="mb-4 flex flex-wrap gap-2">
