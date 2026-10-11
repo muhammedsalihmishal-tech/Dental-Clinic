@@ -1,7 +1,8 @@
-import { BarChart3, Bell, Building2, CalendarCheck, CalendarDays, ClipboardList, FileText, FlaskConical, LayoutDashboard, ListChecks, Megaphone, MessageSquare, PhoneCall, Settings, Stethoscope, Users } from "lucide-react";
+import { BarChart3, Bell, Building2, CalendarCheck, CalendarDays, CheckSquare, ClipboardList, FileText, FlaskConical, LayoutDashboard, ListChecks, Megaphone, MessageSquare, PhoneCall, Settings, Stethoscope, Users } from "lucide-react";
 
 export const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/tasks", label: "Tasks", icon: CheckSquare },
   { href: "/calendar", label: "Calendar", icon: CalendarDays },
   { href: "/patients", label: "Patients", icon: Users },
   { href: "/doctors", label: "Doctors", icon: Stethoscope },
