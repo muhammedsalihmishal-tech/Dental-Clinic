@@ -12,6 +12,7 @@ const INTENT_COLOR: Record<string, string> = {
   CONFIRM: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
   RESCHEDULE: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
   CANCEL: "bg-rose-500/15 text-rose-500",
+  OPT_OUT: "bg-slate-500/15 text-slate-500",
   UNKNOWN: "bg-muted/30 text-muted",
 };
 

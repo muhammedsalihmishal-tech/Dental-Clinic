@@ -1,8 +1,10 @@
+import Link from "next/link";
 import { CheckCircle2, CalendarDays, Clock, Stethoscope } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { getClinic } from "@/lib/config";
 import { fmtTime } from "@/lib/time";
 import { fullName } from "@/lib/utils";
+import { manageBookingUrl } from "@/lib/tokens";
 
 export const dynamic = "force-dynamic";
 
@@ -54,8 +56,16 @@ export default async function BookSuccessPage({ searchParams }: { searchParams: 
           </div>
         )}
 
+        {appt && (
+          <Link
+            href={manageBookingUrl(appt.id)}
+            className="block mb-4 text-center text-sm text-brand hover:underline"
+          >
+            Manage or cancel this booking →
+          </Link>
+        )}
         <p className="text-xs text-muted">
-          Need to change or cancel? Call us at{" "}
+          Need to change? Call us at{" "}
           <span className="font-medium text-fg">{clinic.phone || clinic.name}</span>
         </p>
       </div>
