@@ -134,11 +134,13 @@ model TreatmentType {
   price           Int               @default(0)
   color           String            @default("#6366f1")
   reviewLink      String?           // e.g. Google Maps review URL for this treatment
+  recallMonths    Int?              // months after last appointment before patient is recall-due
   doctors         Doctor[]
   appointments    Appointment[]
   records         TreatmentRecord[]
   reminderRules   ReminderRule[]
   waitlist        Waitlist[]
+  recallLogs      RecallLog[]
 }
 
 model Patient {
@@ -170,6 +172,7 @@ model Patient {
   plans            TreatmentPlan[]
   labOrders        LabOrder[]
   campaignMessages CampaignMessage[]
+  recallLogs       RecallLog[]
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 
@@ -461,4 +464,17 @@ model CampaignMessage {
 
   @@index([campaignId])
   @@index([patientId])
+}
+
+/// Tracks when a patient was sent a recall message for a given treatment type.
+model RecallLog {
+  id              String        @id @default(cuid())
+  patientId       String
+  patient         Patient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  treatmentTypeId String
+  treatmentType   TreatmentType @relation(fields: [treatmentTypeId], references: [id])
+  sentAt          DateTime      @default(now())
+
+  @@index([patientId, treatmentTypeId])
+  @@index([treatmentTypeId, sentAt])
 }

@@ -126,6 +126,7 @@ export async function dragRescheduleAppointment(id: string, newStartIso: string)
 
 export async function saveTreatmentType(f: FormData) {
   const id = str(f, "id");
+  const recallMonthsRaw = int(f, "recallMonths");
   const data = {
     name: str(f, "name") ?? "Treatment",
     durationMinutes: int(f, "durationMinutes") || 30,
@@ -133,6 +134,7 @@ export async function saveTreatmentType(f: FormData) {
     price: int(f, "price"),
     color: str(f, "color") ?? "#6366f1",
     reviewLink: str(f, "reviewLink") ?? null,
+    recallMonths: recallMonthsRaw > 0 ? recallMonthsRaw : null,
   };
   if (id) {
     await prisma.treatmentType.update({ where: { id }, data });
@@ -140,6 +142,7 @@ export async function saveTreatmentType(f: FormData) {
     await prisma.treatmentType.create({ data });
   }
   revalidatePath("/settings/treatments");
+  revalidatePath("/recall");
   revalidatePath("/", "layout");
 }
 
@@ -431,11 +434,42 @@ export async function assignRecordToPlan(f: FormData) {
 
 export async function sendRecallSms(f: FormData) {
   const patientId = str(f, "patientId")!;
+  const treatmentTypeId = str(f, "treatmentTypeId");
   const patient = await prisma.patient.findUniqueOrThrow({ where: { id: patientId } });
   if (patient.optOut) return;
-  const c = await getClinic();
-  const body = `Hi ${patient.firstName}, it's time for your routine dental check-up at ${c.name}! Call us at ${c.phone} to book. – ${c.name}`;
+
+  if (treatmentTypeId) {
+    const recent = await prisma.recallLog.findFirst({
+      where: { patientId, treatmentTypeId, sentAt: { gt: new Date(Date.now() - 30 * 86400000) } },
+    });
+    if (recent) return;
+  }
+
+  const [c, treatment] = await Promise.all([
+    getClinic(),
+    treatmentTypeId ? prisma.treatmentType.findUnique({ where: { id: treatmentTypeId } }) : null,
+  ]);
+  const base = (process.env.NEXTAUTH_URL ?? "").replace(/\/$/, "");
+  const bookUrl = treatmentTypeId ? `${base}/book?t=${treatmentTypeId}` : `${base}/book`;
+  const treatmentName = treatment?.name ?? "check-up";
+  const body = `Hi ${patient.firstName}, you're due for your ${treatmentName} at ${c.name}. Book online: ${bookUrl} or call ${c.phone}. – ${c.name}`;
   await sendMessage(patient.preferredChannel as "SMS" | "WHATSAPP", patient.phone, body).catch(() => null);
+
+  if (treatmentTypeId) {
+    await prisma.recallLog.create({ data: { patientId, treatmentTypeId } });
+  }
+  revalidatePath("/recall");
+}
+
+export async function sendAllRecalls(f: FormData) {
+  const treatmentTypeId = str(f, "treatmentTypeId")!;
+  const patientIds = f.getAll("patientId").map(String).filter(Boolean);
+  for (const patientId of patientIds) {
+    const fd = new FormData();
+    fd.append("patientId", patientId);
+    fd.append("treatmentTypeId", treatmentTypeId);
+    await sendRecallSms(fd);
+  }
   revalidatePath("/recall");
 }
 

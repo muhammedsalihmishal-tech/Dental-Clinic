@@ -1,151 +1,178 @@
 import Link from "next/link";
+import { Send } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { fmtDate } from "@/lib/time";
 import { fullName } from "@/lib/utils";
 import { Empty, PageHeader } from "@/components/ui";
-import { sendRecallSms } from "../actions";
+import { sendRecallSms, sendAllRecalls } from "../actions";
 
 export const dynamic = "force-dynamic";
 
-const GROUPS = [
-  { label: "3–6 months overdue", minDays: 90, maxDays: 180 },
-  { label: "6–12 months overdue", minDays: 180, maxDays: 365 },
-  { label: "12+ months overdue", minDays: 365, maxDays: Infinity },
-];
-
-export default async function RecallPage({ searchParams }: { searchParams: { months?: string } }) {
-  const filterMonths = Number(searchParams.months ?? 0) || null;
+export default async function RecallPage() {
   const now = new Date();
 
-  // Patients with a completed appointment whose last completed appointment is >3 months ago
-  // and who have no upcoming appointments.
-  const cutoff90 = new Date(now.getTime() - 90 * 86400000);
-
-  const lastCompletedRaw = await prisma.appointment.groupBy({
-    by: ["patientId"],
-    _max: { start: true },
-    where: { status: "COMPLETED", start: { lt: cutoff90 } },
+  // Only treatment types that have a recall schedule configured
+  const treatmentTypes = await prisma.treatmentType.findMany({
+    where: { recallMonths: { not: null } },
+    orderBy: { name: "asc" },
   });
 
-  const patientIds = lastCompletedRaw.map((x) => x.patientId);
-  if (patientIds.length === 0) {
+  if (treatmentTypes.length === 0) {
     return (
       <>
-        <PageHeader title="Recall queue" subtitle="Patients due for a check-up" />
-        <Empty>No overdue patients found.</Empty>
+        <PageHeader
+          title="Recall queue"
+          subtitle="Patients due for a follow-up by treatment type"
+        />
+        <Empty>
+          No recall schedules configured. Set a &quot;Recall interval&quot; on one or more treatment types in{" "}
+          <Link href="/settings/treatments" className="text-brand hover:underline">Treatment settings</Link>.
+        </Empty>
       </>
     );
   }
 
-  const withUpcoming = await prisma.appointment.findMany({
-    where: { patientId: { in: patientIds }, start: { gt: now }, status: { in: ["SCHEDULED", "CONFIRMED"] } },
-    select: { patientId: true },
-    distinct: ["patientId"],
-  });
-  const upcomingSet = new Set(withUpcoming.map((a) => a.patientId));
+  type RecallGroup = {
+    treatmentType: (typeof treatmentTypes)[0];
+    items: { patientId: string; firstName: string; lastName: string; phone: string; lastSeen: Date; daysSince: number; lastRecallSentAt: Date | null }[];
+  };
 
-  const overdueMap = new Map(
-    lastCompletedRaw
-      .filter((x) => !upcomingSet.has(x.patientId))
-      .map((x) => [x.patientId, x._max.start!]),
-  );
+  const groups: RecallGroup[] = [];
 
-  const patients = await prisma.patient.findMany({
-    where: { id: { in: [...overdueMap.keys()] }, optOut: false },
-    include: {
-      appointments: {
-        where: { status: "COMPLETED" },
-        orderBy: { start: "desc" },
-        take: 1,
-        include: { doctor: { select: { name: true } }, treatmentType: { select: { name: true } } },
+  for (const tt of treatmentTypes) {
+    const recallMonths = tt.recallMonths!;
+    const cutoff = new Date(now.getTime() - recallMonths * 30 * 86400000);
+    const recallDedupeWindow = new Date(now.getTime() - 30 * 86400000);
+
+    // Patients whose last COMPLETED appointment for this treatment type was before cutoff
+    const lastAppts = await prisma.appointment.groupBy({
+      by: ["patientId"],
+      _max: { start: true },
+      where: { treatmentTypeId: tt.id, status: "COMPLETED", start: { lt: cutoff } },
+    });
+    if (lastAppts.length === 0) continue;
+
+    const candidateIds = lastAppts.map((x) => x.patientId);
+    const lastApptMap = new Map(lastAppts.map((x) => [x.patientId, x._max.start!]));
+
+    // Exclude patients with upcoming appointments of this type
+    const hasUpcoming = await prisma.appointment.findMany({
+      where: {
+        patientId: { in: candidateIds },
+        treatmentTypeId: tt.id,
+        status: { in: ["SCHEDULED", "CONFIRMED"] },
+        start: { gt: now },
       },
-    },
-  });
+      select: { patientId: true },
+      distinct: ["patientId"],
+    });
+    const upcomingSet = new Set(hasUpcoming.map((a) => a.patientId));
 
-  const withDays = patients
-    .map((p) => {
-      const last = overdueMap.get(p.id);
-      if (!last) return null;
-      const days = Math.floor((now.getTime() - last.getTime()) / 86400000);
-      return { patient: p, lastSeen: last, days };
-    })
-    .filter(Boolean) as { patient: typeof patients[0]; lastSeen: Date; days: number }[];
+    const dueIds = candidateIds.filter((id) => !upcomingSet.has(id));
+    if (dueIds.length === 0) continue;
 
-  withDays.sort((a, b) => b.days - a.days);
+    const patients = await prisma.patient.findMany({
+      where: { id: { in: dueIds }, optOut: false },
+      select: { id: true, firstName: true, lastName: true, phone: true },
+    });
 
-  const groups = GROUPS.map((g) => ({
-    ...g,
-    items: withDays.filter((x) => x.days >= g.minDays && x.days < g.maxDays),
-  })).filter((g) => {
-    if (filterMonths) {
-      const minDays = filterMonths * 30;
-      return g.minDays >= minDays;
-    }
-    return g.items.length > 0;
-  });
+    // Fetch most recent recall log per patient for this treatment type
+    const recentLogs = await prisma.recallLog.findMany({
+      where: { patientId: { in: dueIds }, treatmentTypeId: tt.id },
+      orderBy: { sentAt: "desc" },
+      distinct: ["patientId"],
+    });
+    const logMap = new Map(recentLogs.map((l) => [l.patientId, l.sentAt]));
 
-  const total = withDays.length;
+    const items = patients
+      .map((p) => {
+        const lastSeen = lastApptMap.get(p.id);
+        if (!lastSeen) return null;
+        const lastRecallSentAt = logMap.get(p.id) ?? null;
+        const alreadySentRecently = lastRecallSentAt && lastRecallSentAt > recallDedupeWindow;
+        if (alreadySentRecently) return null;
+        return {
+          patientId: p.id,
+          firstName: p.firstName,
+          lastName: p.lastName,
+          phone: p.phone,
+          lastSeen,
+          daysSince: Math.floor((now.getTime() - lastSeen.getTime()) / 86400000),
+          lastRecallSentAt,
+        };
+      })
+      .filter(Boolean) as RecallGroup["items"];
+
+    if (items.length === 0) continue;
+    items.sort((a, b) => b.daysSince - a.daysSince);
+    groups.push({ treatmentType: tt, items });
+  }
+
+  const total = groups.reduce((s, g) => s + g.items.length, 0);
 
   return (
     <>
       <PageHeader
         title="Recall queue"
-        subtitle={`${total} patient${total !== 1 ? "s" : ""} overdue for a check-up`}
+        subtitle={`${total} patient${total !== 1 ? "s" : ""} due for a follow-up`}
         actions={
-          <div className="flex gap-2">
-            {[null, 3, 6, 12].map((m) => (
-              <Link
-                key={m ?? "all"}
-                href={m ? `/recall?months=${m}` : "/recall"}
-                className={`btn-ghost btn-sm ${(!filterMonths && !m) || filterMonths === m ? "bg-brand-soft text-brand" : ""}`}
-              >
-                {m ? `${m}m+` : "All"}
-              </Link>
-            ))}
-          </div>
+          <Link href="/settings/treatments" className="btn-ghost btn-sm">
+            Configure schedules
+          </Link>
         }
       />
 
-      {total === 0 && <Empty>No overdue patients — great work!</Empty>}
+      {total === 0 && <Empty>No patients are recall-due right now — great work!</Empty>}
 
-      <div className="space-y-6">
-        {groups.map((group) =>
-          group.items.length === 0 ? null : (
-            <div key={group.label}>
-              <h2 className="mb-3 text-sm font-semibold text-muted uppercase tracking-wide">{group.label}</h2>
-              <div className="card divide-y divide-border">
-                {group.items.map(({ patient: p, lastSeen, days }) => {
-                  const lastAppt = p.appointments[0];
-                  return (
-                    <div key={p.id} className="flex items-center gap-4 px-5 py-4">
-                      <div className="flex-1 min-w-0">
-                        <Link href={`/patients/${p.id}`} className="font-medium hover:underline">
-                          {fullName(p)}
-                        </Link>
-                        <p className="text-sm text-muted">
-                          Last seen {fmtDate(lastSeen)} ({days} days ago)
-                          {lastAppt ? ` · ${lastAppt.treatmentType.name} with ${lastAppt.doctor.name}` : ""}
-                        </p>
-                      </div>
-                      <div className="flex gap-2 shrink-0">
-                        <Link
-                          href={`/appointments/new?patientId=${p.id}`}
-                          className="btn-ghost btn-sm"
-                        >
-                          Book
-                        </Link>
-                        <form action={sendRecallSms}>
-                          <input type="hidden" name="patientId" value={p.id} />
-                          <button className="btn-ghost btn-sm">SMS</button>
-                        </form>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+      <div className="space-y-8">
+        {groups.map(({ treatmentType: tt, items }) => (
+          <div key={tt.id}>
+            <div className="mb-3 flex items-center gap-3">
+              <span className="h-3 w-3 rounded-full shrink-0" style={{ background: tt.color }} />
+              <h2 className="text-sm font-semibold">
+                {tt.name}
+                <span className="ml-2 font-normal text-muted">· recall every {tt.recallMonths} months · {items.length} due</span>
+              </h2>
+              <form action={sendAllRecalls} className="ml-auto">
+                <input type="hidden" name="treatmentTypeId" value={tt.id} />
+                {items.map((item) => (
+                  <input key={item.patientId} type="hidden" name="patientId" value={item.patientId} />
+                ))}
+                <button className="btn-primary btn-sm gap-1.5">
+                  <Send className="h-3.5 w-3.5" /> Send all ({items.length})
+                </button>
+              </form>
             </div>
-          ),
-        )}
+
+            <div className="card divide-y divide-border">
+              {items.map((item) => (
+                <div key={item.patientId} className="flex items-center gap-4 px-5 py-4">
+                  <div className="flex-1 min-w-0">
+                    <Link href={`/patients/${item.patientId}`} className="font-medium hover:underline">
+                      {fullName(item)}
+                    </Link>
+                    <p className="text-sm text-muted">
+                      Last {tt.name.toLowerCase()} {fmtDate(item.lastSeen)} · {item.daysSince} days ago
+                      {item.lastRecallSentAt && (
+                        <span className="ml-2 text-xs">· recalled {fmtDate(item.lastRecallSentAt)}</span>
+                      )}
+                    </p>
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    <Link href={`/appointments/new?patientId=${item.patientId}`} className="btn-ghost btn-sm">
+                      Book
+                    </Link>
+                    <form action={sendRecallSms}>
+                      <input type="hidden" name="patientId" value={item.patientId} />
+                      <input type="hidden" name="treatmentTypeId" value={tt.id} />
+                      <button className="btn-ghost btn-sm">SMS</button>
+                    </form>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
     </>
   );
