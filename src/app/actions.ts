@@ -8,6 +8,7 @@ import { BookingError, bookAppointment, rescheduleAppointment, setAppointmentSta
 import { processDueReminders, scheduleTreatmentFollowUps } from "@/lib/reminders";
 import { sendMessage } from "@/lib/messaging";
 import { getClinic } from "@/lib/config";
+import { audit } from "@/lib/audit";
 import { clinicDateAt, fmtTime, labelToMinutes } from "@/lib/time";
 import { manageBookingUrl } from "@/lib/tokens";
 import { formatMoney, normalizePhone } from "@/lib/utils";
@@ -52,6 +53,7 @@ export async function savePatient(_: ActionState, f: FormData): Promise<ActionSt
   const clash = await prisma.patient.findUnique({ where: { phone: data.phone } });
   if (clash && clash.id !== id) return { error: `This phone already belongs to ${clash.firstName} ${clash.lastName}.` };
   const patient = id ? await prisma.patient.update({ where: { id }, data }) : await prisma.patient.create({ data });
+  await audit(id ? "UPDATE" : "CREATE", "Patient", patient.id, `${data.firstName} ${data.lastName}`);
   revalidatePath("/patients");
   redirect(`/patients/${patient.id}`);
 }
@@ -94,7 +96,8 @@ export async function createAppointment(_: ActionState, f: FormData): Promise<Ac
   const treatmentTypeId = str(f, "treatmentTypeId");
   if (!start || !patientId || !doctorId || !treatmentTypeId) return { error: "Pick a patient, treatment and time slot." };
   try {
-    await bookAppointment({ patientId, doctorId, treatmentTypeId, start: new Date(start), notes: str(f, "notes"), source: "STAFF" });
+    const appt = await bookAppointment({ patientId, doctorId, treatmentTypeId, start: new Date(start), notes: str(f, "notes"), source: "STAFF" });
+    await audit("CREATE", "Appointment", appt.id, `Patient ${patientId}`);
   } catch (e) {
     if (e instanceof BookingError) return { error: e.message };
     throw e;
@@ -106,7 +109,9 @@ export async function createAppointment(_: ActionState, f: FormData): Promise<Ac
 
 export async function updateAppointmentStatus(f: FormData) {
   const id = str(f, "id")!;
-  await setAppointmentStatus(id, str(f, "status") as AppointmentStatus);
+  const status = str(f, "status") as AppointmentStatus;
+  await setAppointmentStatus(id, status);
+  await audit("UPDATE", "Appointment", id, `status → ${status}`);
   revalidatePath("/", "layout");
 }
 
@@ -318,7 +323,7 @@ export async function createInvoice(f: FormData) {
   const patientId = str(f, "patientId")!;
   const amount = int(f, "amount");
   const number = await nextInvoiceNumber();
-  await prisma.invoice.create({
+  const inv = await prisma.invoice.create({
     data: {
       number,
       patientId,
@@ -328,6 +333,7 @@ export async function createInvoice(f: FormData) {
       status: "DRAFT",
     },
   });
+  await audit("CREATE", "Invoice", inv.id, `${number} ₹${amount}`);
   revalidatePath("/invoices");
   revalidatePath(`/patients/${patientId}`);
 }
@@ -339,6 +345,7 @@ export async function updateInvoiceStatus(f: FormData) {
     where: { id },
     data: { status, paidAt: status === "PAID" ? new Date() : undefined },
   });
+  await audit("UPDATE", "Invoice", id, `status → ${status}`);
   revalidatePath("/invoices");
 }
 
