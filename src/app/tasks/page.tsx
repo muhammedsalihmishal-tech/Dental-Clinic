@@ -1,143 +1,113 @@
 import Link from "next/link";
-import { CheckCircle2, CheckSquare, Trash2 } from "lucide-react";
+import { CheckSquare, CircleDashed, AlertCircle } from "lucide-react";
 import { prisma } from "@/lib/prisma";
-import { fmtDateTime } from "@/lib/time";
+import { fmtDate, todayString } from "@/lib/time";
 import { fullName } from "@/lib/utils";
-import { Badge, Card, Empty, PageHeader } from "@/components/ui";
-import { completeTask, createTask, deleteTask } from "@/app/actions";
+import { Card, Empty, PageHeader, StatCard } from "@/components/ui";
+import { completeTask, deleteTask } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
 
-type Filter = "all" | "urgent" | "done";
+const PRIORITY_TONE = {
+  URGENT: "text-rose-500 font-semibold",
+  NORMAL: "text-fg",
+  LOW: "text-muted",
+} as const;
 
-export default async function TasksPage({ searchParams }: { searchParams: Promise<{ filter?: string }> }) {
-  const { filter: rawFilter } = await searchParams;
-  const filter: Filter = (rawFilter as Filter) ?? "all";
+const PRIORITY_LABEL = { URGENT: "Urgent", NORMAL: "Normal", LOW: "Low" } as const;
 
-  const where =
-    filter === "urgent"
-      ? { done: false, priority: "URGENT" as const }
-      : filter === "done"
-        ? { done: true }
-        : { done: false };
+export default async function TasksPage() {
+  const today = todayString();
+  const todayStart = new Date(`${today}T00:00:00`);
 
-  const [tasks, openCount, urgentCount] = await Promise.all([
+  const [tasks, totalDone] = await Promise.all([
     prisma.task.findMany({
-      where,
-      include: { patient: { select: { id: true, firstName: true, lastName: true } } },
-      orderBy: [{ priority: "desc" }, { createdAt: "asc" }],
+      where: { done: false },
+      include: { patient: true },
+      orderBy: [{ priority: "asc" }, { dueAt: "asc" }, { createdAt: "asc" }],
     }),
-    prisma.task.count({ where: { done: false } }),
-    prisma.task.count({ where: { done: false, priority: "URGENT" } }),
+    prisma.task.count({ where: { done: true } }),
   ]);
 
-  const tabs: { key: Filter; label: string; count?: number }[] = [
-    { key: "all", label: "Open", count: openCount },
-    { key: "urgent", label: "Urgent", count: urgentCount },
-    { key: "done", label: "Completed" },
-  ];
+  // Group by bucket: overdue / due today / upcoming / no due date
+  const overdue = tasks.filter((t) => t.dueAt && t.dueAt < todayStart);
+  const dueToday = tasks.filter((t) => t.dueAt && t.dueAt >= todayStart && fmtDate(t.dueAt) === fmtDate(todayStart));
+  const upcoming = tasks.filter((t) => t.dueAt && t.dueAt > todayStart && fmtDate(t.dueAt) !== fmtDate(todayStart));
+  const noDueDate = tasks.filter((t) => !t.dueAt);
+
+  const urgent = tasks.filter((t) => t.priority === "URGENT").length;
 
   return (
     <>
       <PageHeader
         title="Tasks"
-        subtitle={`${openCount} open task${openCount !== 1 ? "s" : ""} · ${urgentCount} urgent`}
-        icon={CheckSquare}
+        subtitle="All open tasks across every patient."
       />
 
-      <div className="grid gap-6 xl:grid-cols-3">
-        <div className="xl:col-span-2 space-y-4">
-          {/* Filter tabs */}
-          <div className="flex gap-1 rounded-xl bg-surface-2 p-1">
-            {tabs.map((t) => (
-              <Link
-                key={t.key}
-                href={`/tasks?filter=${t.key}`}
-                className={[
-                  "flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition",
-                  filter === t.key ? "bg-surface text-fg shadow-sm" : "text-muted hover:text-fg",
-                ].join(" ")}
-              >
-                {t.label}
-                {t.count !== undefined && t.count > 0 && (
-                  <span className={[
-                    "rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none",
-                    t.key === "urgent" ? "bg-rose-500/15 text-rose-600 dark:text-rose-400" : "bg-brand/15 text-brand",
-                  ].join(" ")}>
-                    {t.count}
-                  </span>
-                )}
-              </Link>
-            ))}
-          </div>
-
-          {/* Task list */}
-          <Card>
-            {tasks.length === 0 ? (
-              <Empty>
-                {filter === "done" ? "No completed tasks yet." : filter === "urgent" ? "No urgent tasks." : "All caught up ✨"}
-              </Empty>
-            ) : (
-              <ul className="divide-y divide-border">
-                {tasks.map((t) => (
-                  <li key={t.id} className="flex items-start gap-3 px-5 py-3.5">
-                    {!t.done && (
-                      <form action={completeTask}>
-                        <input type="hidden" name="id" value={t.id} />
-                        <button className="mt-0.5 text-muted transition hover:text-emerald-500" aria-label="Mark done">
-                          <CheckCircle2 className="h-5 w-5" />
-                        </button>
-                      </form>
-                    )}
-                    {t.done && (
-                      <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-500" />
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <div className={["text-sm", t.done ? "line-through text-muted" : ""].join(" ")}>{t.title}</div>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
-                        <span>{fmtDateTime(t.createdAt)}</span>
-                        {t.patient && (
-                          <Link href={`/patients/${t.patient.id}`} className="hover:text-brand">
-                            {fullName(t.patient)}
-                          </Link>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      {t.priority === "URGENT" && <Badge tone="rose">Urgent</Badge>}
-                      {t.priority === "LOW" && <Badge tone="gray">Low</Badge>}
-                      <form action={deleteTask}>
-                        <input type="hidden" name="id" value={t.id} />
-                        <button className="text-muted transition hover:text-rose-500" aria-label="Delete task">
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </form>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-        </div>
-
-        {/* Add task sidebar */}
-        <Card title="New task">
-          <form action={createTask} className="space-y-3 p-5">
-            <input name="title" placeholder="Task title…" required className="input" />
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-muted">Priority</label>
-                <select name="priority" className="input">
-                  <option value="NORMAL">Normal</option>
-                  <option value="URGENT">Urgent</option>
-                  <option value="LOW">Low</option>
-                </select>
-              </div>
-            </div>
-            <button className="btn-primary w-full">Add task</button>
-          </form>
-        </Card>
+      <div className="mb-6 grid gap-4 sm:grid-cols-3">
+        <StatCard label="Open tasks" value={tasks.length} hint={`${urgent} urgent`} icon={CircleDashed} tone="indigo" />
+        <StatCard label="Overdue" value={overdue.length} hint="Past due date" icon={AlertCircle} tone={overdue.length > 0 ? "rose" : "gray"} />
+        <StatCard label="Completed (all time)" value={totalDone} icon={CheckSquare} tone="emerald" />
       </div>
+
+      {tasks.length === 0 ? (
+        <Card><Empty>No open tasks. Add tasks from a patient&apos;s profile.</Empty></Card>
+      ) : (
+        <div className="space-y-6">
+          {[
+            { label: "Overdue", items: overdue, labelClass: "text-rose-500" },
+            { label: "Due today", items: dueToday, labelClass: "text-amber-500" },
+            { label: "Upcoming", items: upcoming, labelClass: "text-fg" },
+            { label: "No due date", items: noDueDate, labelClass: "text-muted" },
+          ]
+            .filter((g) => g.items.length > 0)
+            .map(({ label, items, labelClass }) => (
+              <div key={label}>
+                <h2 className={`mb-2 text-xs font-semibold uppercase tracking-wider ${labelClass}`}>
+                  {label} · {items.length}
+                </h2>
+                <Card>
+                  <ul className="divide-y divide-border">
+                    {items.map((t) => (
+                      <li key={t.id} className="flex items-start gap-3 px-5 py-3.5">
+                        {/* Complete button */}
+                        <form action={completeTask} className="mt-0.5 shrink-0">
+                          <input type="hidden" name="id" value={t.id} />
+                          <button
+                            title="Mark done"
+                            className="flex h-5 w-5 items-center justify-center rounded-full border-2 border-border text-muted transition hover:border-brand hover:text-brand"
+                          >
+                            <CheckSquare className="h-3 w-3" />
+                          </button>
+                        </form>
+
+                        {/* Task body */}
+                        <div className="min-w-0 flex-1">
+                          <p className={`text-sm ${PRIORITY_TONE[t.priority]}`}>{t.title}</p>
+                          <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted">
+                            {t.patient && (
+                              <Link href={`/patients/${t.patient.id}`} className="hover:text-brand">
+                                {fullName(t.patient)}
+                              </Link>
+                            )}
+                            {t.dueAt && <span>Due {fmtDate(t.dueAt)}</span>}
+                            <span className={t.priority === "URGENT" ? "text-rose-500" : ""}>{PRIORITY_LABEL[t.priority]}</span>
+                          </div>
+                        </div>
+
+                        {/* Delete button */}
+                        <form action={deleteTask} className="shrink-0">
+                          <input type="hidden" name="id" value={t.id} />
+                          <button className="text-xs text-muted hover:text-rose-500 transition">×</button>
+                        </form>
+                      </li>
+                    ))}
+                  </ul>
+                </Card>
+              </div>
+            ))}
+        </div>
+      )}
     </>
   );
 }
