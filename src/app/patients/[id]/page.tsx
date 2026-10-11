@@ -34,6 +34,9 @@ export default async function PatientPage({ params }: { params: { id: string } }
   ]);
 
   const now = new Date();
+  const isBirthday = patient.dateOfBirth
+    ? patient.dateOfBirth.getMonth() === now.getMonth() && patient.dateOfBirth.getDate() === now.getDate()
+    : false;
   const risk = noShowRiskScore(patient);
   const upcoming = patient.appointments
     .filter((a) => a.start > now && (["SCHEDULED", "CONFIRMED"].includes(a.status) || (a.status === "HELD" && a.holdExpiresAt! > now)))
@@ -119,6 +122,7 @@ export default async function PatientPage({ params }: { params: { id: string } }
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-xl font-semibold">{fullName(patient)}</h1>
                 <PatientBadge status={patient.status} />
+                {isBirthday && <Badge tone="amber">🎂 Birthday today</Badge>}
                 {patient.tags.map((t) => <Badge key={t}>{t}</Badge>)}
               </div>
               <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted">

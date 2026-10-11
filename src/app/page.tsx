@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Bell, Bot, CalendarCheck, CheckCircle2, PhoneIncoming, UserPlus, UserX } from "lucide-react";
+import { Bell, Bot, CalendarCheck, Cake, CheckCircle2, PhoneIncoming, UserPlus, UserX } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { addDays, clinicDateAt, fmtTime, todayString } from "@/lib/time";
 import { formatMoney, fullName } from "@/lib/utils";
@@ -16,13 +16,17 @@ function greeting() {
 }
 
 export default async function Dashboard() {
+  const now = new Date();
   const today = todayString();
   const dayStart = clinicDateAt(today, 0);
   const dayEnd = clinicDateAt(addDays(today, 1), 0);
   const weekAgo = new Date(Date.now() - 7 * 86_400_000);
   const monthAgo = new Date(Date.now() - 30 * 86_400_000);
 
-  const [todayAppts, aiBooked, newPatients, noShows, pendingReminders, calls, tasks, revenue] = await Promise.all([
+  const todayMonth = now.getMonth() + 1;
+  const todayDay = now.getDate();
+
+  const [todayAppts, aiBooked, newPatients, noShows, pendingReminders, calls, tasks, revenue, birthdayPatients] = await Promise.all([
     prisma.appointment.findMany({
       where: { start: { gte: dayStart, lt: dayEnd }, status: { notIn: ["CANCELLED", "HELD"] } },
       include: {
@@ -46,6 +50,12 @@ export default async function Dashboard() {
     prisma.callLog.findMany({ include: { patient: true }, orderBy: { startedAt: "desc" }, take: 5 }),
     prisma.task.findMany({ where: { done: false }, include: { patient: true }, orderBy: [{ priority: "desc" }, { createdAt: "asc" }], take: 8 }),
     prisma.treatmentRecord.aggregate({ _sum: { cost: true }, where: { status: "COMPLETED", performedAt: { gte: monthAgo } } }),
+    prisma.$queryRaw<{ id: string; firstName: string; lastName: string }[]>`
+      SELECT id, "firstName", "lastName" FROM "Patient"
+      WHERE "dateOfBirth" IS NOT NULL AND "optOut" = false
+        AND EXTRACT(MONTH FROM "dateOfBirth") = ${todayMonth}
+        AND EXTRACT(DAY FROM "dateOfBirth") = ${todayDay}
+    `,
   ]);
 
   const done = todayAppts.filter((a) => a.status === "COMPLETED").length;
@@ -187,6 +197,32 @@ export default async function Dashboard() {
           </div>
         </Card>
       </div>
+
+      {birthdayPatients.length > 0 && (
+        <div className="mt-6">
+          <Card
+            title={
+              <span className="flex items-center gap-2">
+                <Cake className="h-4 w-4 text-brand" /> Birthdays today
+              </span>
+            }
+          >
+            <ul className="flex flex-wrap gap-3 p-5">
+              {birthdayPatients.map((p) => (
+                <li key={p.id}>
+                  <Link
+                    href={`/patients/${p.id}`}
+                    className="flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-sm hover:border-brand hover:text-brand transition-colors"
+                  >
+                    <Avatar name={`${p.firstName} ${p.lastName}`} size="sm" />
+                    {p.firstName} {p.lastName}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </Card>
+        </div>
+      )}
     </>
   );
 }
