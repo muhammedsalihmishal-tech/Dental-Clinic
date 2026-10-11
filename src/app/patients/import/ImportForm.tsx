@@ -98,8 +98,7 @@ export function ImportForm() {
     if (!rows) return;
     const valid = rows.filter((r) => r._valid);
     setLoading(true);
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const res = await importPatients(valid.map(({ _valid, _error, _duplicate, ...r }) => r));
+    const res = await importPatients(valid.map(({ _valid: _v, _error: _e, _duplicate: _d, ...r }) => r));
     setResult(res);
     setLoading(false);
     setRows(null);
