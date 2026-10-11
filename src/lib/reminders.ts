@@ -176,8 +176,21 @@ export async function processInboundReply(
     const patient = await prisma.patient.findUnique({ where: { phone: from } });
     if (patient) {
       const c = await getClinic();
-      const replyBody = `Hi ${patient.firstName}, no problem! Call us at ${c.phone} or book online. We'll sort it out. – ${c.name}`;
+      const appt = await prisma.appointment.findFirst({
+        where: { patientId: patient.id, status: { in: ["SCHEDULED", "CONFIRMED"] }, start: { gt: new Date() } },
+        orderBy: { start: "asc" },
+        include: { treatmentType: true },
+      });
+      const bookingLink = appt ? `${process.env.NEXTAUTH_URL ?? ""}/book?t=${appt.treatmentTypeId}` : null;
+      const replyBody = bookingLink
+        ? `Hi ${patient.firstName}, no problem! Book your new ${appt!.treatmentType.name} slot here: ${bookingLink} – ${c.name}`
+        : `Hi ${patient.firstName}, no problem! Call us at ${c.phone} and we'll sort it out. – ${c.name}`;
       await sendMessage(channel, from, replyBody).catch(() => null);
+      if (appt) {
+        await prisma.task.create({
+          data: { title: `Patient requested reschedule via reply: ${fullName(patient)}`, patientId: patient.id, priority: "NORMAL" },
+        });
+      }
       await prisma.inboundMessage.updateMany({ where: { from, intent: "RESCHEDULE", handled: false }, data: { handled: true } });
     }
   } else if (intent === "CANCEL") {
