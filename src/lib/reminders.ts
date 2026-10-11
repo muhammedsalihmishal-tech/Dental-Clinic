@@ -1,10 +1,11 @@
 import type { Appointment, Prisma, ReminderRule, TreatmentRecord, AppointmentStatus } from "@prisma/client";
 import { prisma } from "./prisma";
-import { clinic, QUIET_HOURS } from "./config";
+import { clinic, QUIET_HOURS, getClinic } from "./config";
 import { addDays, clinicDateAt, clinicDateString, clinicMinuteOfDay, fmtDate, fmtTime } from "./time";
 import { sendMessage } from "./messaging";
 import { fullName } from "./utils";
 import { generatePersonalisedMessage } from "./ai-messages";
+import { notifyWaitlistForSlot } from "./waitlist";
 
 /** Local time of day that day-based reminders go out (10:00). */
 const DAY_REMINDER_MINUTE = 10 * 60;
@@ -140,20 +141,20 @@ export async function processInboundReply(
   body: string,
   channel: "SMS" | "WHATSAPP",
   rawPayload?: Record<string, unknown>,
-): Promise<"CONFIRM" | "RESCHEDULE" | "CANCEL" | "UNKNOWN"> {
+): Promise<"CONFIRM" | "RESCHEDULE" | "CANCEL" | "OPT_OUT" | "UNKNOWN"> {
   const normalised = body.trim().toUpperCase();
-  let intent: "CONFIRM" | "RESCHEDULE" | "CANCEL" | "UNKNOWN" = "UNKNOWN";
+  let intent: "CONFIRM" | "RESCHEDULE" | "CANCEL" | "OPT_OUT" | "UNKNOWN" = "UNKNOWN";
 
-  if (/^(YES|Y|CONFIRM|OK|OKAY|SI|SÍ|HA|HA|हां|YES PLEASE)/.test(normalised)) intent = "CONFIRM";
+  if (/^(YES|Y|CONFIRM|OK|OKAY|SI|SÍ|HA|हां|YES PLEASE)/.test(normalised)) intent = "CONFIRM";
   else if (/^(RESCHEDULE|REBOOK|CHANGE|MOVE|CANCEL AND RESCHEDULE)/.test(normalised)) intent = "RESCHEDULE";
-  else if (/^(NO|CANCEL|STOP|OPTOUT|OPT OUT|UNSUBSCRIBE)/.test(normalised)) intent = "CANCEL";
+  else if (/^(STOP|OPTOUT|OPT OUT|UNSUBSCRIBE)/.test(normalised)) intent = "OPT_OUT";
+  else if (/^(NO|CANCEL)/.test(normalised)) intent = "CANCEL";
 
   await prisma.inboundMessage.create({
     data: { from, body, channel, intent, handled: false, rawPayload: (rawPayload ?? {}) as Record<string, string> },
   });
 
   if (intent === "CONFIRM") {
-    // Confirm the next upcoming SCHEDULED appointment for this patient
     const patient = await prisma.patient.findUnique({ where: { phone: from } });
     if (patient) {
       const appt = await prisma.appointment.findFirst({
@@ -166,22 +167,42 @@ export async function processInboundReply(
       }
     }
   } else if (intent === "RESCHEDULE") {
-    // Send a rebook prompt back to the patient
     const patient = await prisma.patient.findUnique({ where: { phone: from } });
     if (patient) {
-      const replyBody = `Hi ${patient.firstName}, no problem! Call us at ${clinic.phone} or reply with your preferred date and time and we'll sort it out. – ${clinic.name}`;
+      const c = await getClinic();
+      const replyBody = `Hi ${patient.firstName}, no problem! Call us at ${c.phone} or book online. We'll sort it out. – ${c.name}`;
       await sendMessage(channel, from, replyBody).catch(() => null);
       await prisma.inboundMessage.updateMany({ where: { from, intent: "RESCHEDULE", handled: false }, data: { handled: true } });
     }
   } else if (intent === "CANCEL") {
-    // Mark patient as opted out of reminders
+    const patient = await prisma.patient.findUnique({ where: { phone: from } });
+    if (patient) {
+      const appt = await prisma.appointment.findFirst({
+        where: { patientId: patient.id, status: { in: ["SCHEDULED", "CONFIRMED"] }, start: { gt: new Date() } },
+        orderBy: { start: "asc" },
+      });
+      if (appt) {
+        await prisma.appointment.update({ where: { id: appt.id }, data: { status: "CANCELLED" } });
+        await cancelPendingAppointmentReminders(appt.id);
+        await notifyWaitlistForSlot(appt.treatmentTypeId, appt.doctorId);
+        await prisma.task.create({
+          data: { title: `Patient cancelled via reply: ${fullName(patient)}`, patientId: patient.id, priority: "URGENT" },
+        });
+      }
+      const c = await getClinic();
+      const replyBody = `Hi ${patient.firstName}, your appointment has been cancelled. Call us at ${c.phone} to rebook. – ${c.name}`;
+      await sendMessage(channel, from, replyBody).catch(() => null);
+      await prisma.inboundMessage.updateMany({ where: { from, intent: "CANCEL", handled: false }, data: { handled: true } });
+    }
+  } else if (intent === "OPT_OUT") {
     await prisma.patient.updateMany({ where: { phone: from }, data: { optOut: true } });
     const patient = await prisma.patient.findUnique({ where: { phone: from } });
     if (patient) {
-      const replyBody = `You've been unsubscribed from ${clinic.name} messages. Call ${clinic.phone} to re-subscribe anytime. – ${clinic.name}`;
+      const c = await getClinic();
+      const replyBody = `You've been unsubscribed from ${c.name} messages. Call ${c.phone} to re-subscribe anytime. – ${c.name}`;
       await sendMessage(channel, from, replyBody).catch(() => null);
     }
-    await prisma.inboundMessage.updateMany({ where: { from, intent: "CANCEL", handled: false }, data: { handled: true } });
+    await prisma.inboundMessage.updateMany({ where: { from, intent: "OPT_OUT", handled: false }, data: { handled: true } });
   }
 
   return intent;

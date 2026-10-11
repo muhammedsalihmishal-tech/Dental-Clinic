@@ -8,7 +8,8 @@ import { BookingError, bookAppointment, rescheduleAppointment, setAppointmentSta
 import { processDueReminders, scheduleTreatmentFollowUps } from "@/lib/reminders";
 import { sendMessage } from "@/lib/messaging";
 import { getClinic } from "@/lib/config";
-import { clinicDateAt, labelToMinutes } from "@/lib/time";
+import { clinicDateAt, fmtTime, labelToMinutes } from "@/lib/time";
+import { manageBookingUrl } from "@/lib/tokens";
 import { formatMoney, normalizePhone } from "@/lib/utils";
 
 const str = (f: FormData, k: string) => {
@@ -564,6 +565,19 @@ export async function bookPublicAppointment(f: FormData): Promise<{ error?: stri
       source: "ONLINE",
       notes: str(f, "notes"),
     });
+
+    // Send confirmation with manage link (fire-and-forget)
+    Promise.all([
+      prisma.treatmentType.findUnique({ where: { id: treatmentTypeId } }),
+      prisma.doctor.findUnique({ where: { id: doctorId } }),
+      getClinic(),
+    ]).then(([treatment, doctor, c]) => {
+      if (!treatment || !doctor) return;
+      const manageUrl = manageBookingUrl(appt.id);
+      const msg = `Hi ${patient.firstName}, your ${treatment.name} with ${doctor.name} on ${appt.start.toLocaleDateString("en", { weekday: "short", day: "numeric", month: "short" })} at ${fmtTime(appt.start)} is confirmed at ${c.name}. Manage: ${manageUrl}`;
+      return sendMessage(patient.preferredChannel, patient.phone, msg);
+    }).catch(() => null);
+
     return { appointmentId: appt.id };
   } catch (e) {
     if (e instanceof BookingError) return { error: e.message };
