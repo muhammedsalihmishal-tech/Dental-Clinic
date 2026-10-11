@@ -66,3 +66,9 @@ body {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: none; }
 }
+
+@media print {
+  body { background: white !important; color: black !important; }
+  .print\:hidden { display: none !important; }
+  aside, nav, header { display: none !important; }
+}
