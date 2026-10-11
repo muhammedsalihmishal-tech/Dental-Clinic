@@ -17,7 +17,12 @@ const themeScript = `try{var t=localStorage.getItem('theme');if(t==='dark'||(!t&
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const pathname = (await headers()).get("x-invoke-path") ?? "";
   const isPublic = pathname.startsWith("/book");
-  const inboxCount = isPublic ? 0 : await prisma.inboundMessage.count({ where: { handled: false } }).catch(() => 0);
+  const [inboxCount, taskCount] = isPublic
+    ? [0, 0]
+    : await Promise.all([
+        prisma.inboundMessage.count({ where: { handled: false } }).catch(() => 0),
+        prisma.task.count({ where: { done: false } }).catch(() => 0),
+      ]);
 
   return (
     <html lang="en" suppressHydrationWarning>
@@ -30,7 +35,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             <main className="min-h-screen bg-bg">{children}</main>
           ) : (
             <div className="flex min-h-screen">
-              <Sidebar inboxCount={inboxCount} />
+              <Sidebar inboxCount={inboxCount} taskCount={taskCount} />
               <div className="flex min-w-0 flex-1 flex-col">
                 <Topbar />
                 <main className="mx-auto w-full max-w-7xl flex-1 px-4 pb-16 pt-6 sm:px-8">{children}</main>

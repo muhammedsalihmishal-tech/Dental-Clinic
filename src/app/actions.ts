@@ -300,6 +300,11 @@ export async function completeTask(f: FormData) {
   revalidatePath("/", "layout");
 }
 
+export async function deleteTask(f: FormData) {
+  await prisma.task.delete({ where: { id: str(f, "id")! } });
+  revalidatePath("/", "layout");
+}
+
 // ---------- Invoices ----------
 
 async function nextInvoiceNumber(): Promise<string> {
