@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, Bot } from "lucide-react";
+import { Bot, ChevronLeft, ChevronRight, Globe } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { addDays, clinicDateAt, clinicMinuteOfDay, dayOfWeek, fmt, fmtTime, minutesToLabel, todayString } from "@/lib/time";
 import { cn, fullName } from "@/lib/utils";
@@ -101,6 +101,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: { d
                       >
                         <div className="flex items-center gap-1 font-semibold truncate">
                           {a.source === "VOICE_AI" && <Bot className="h-3 w-3 shrink-0" />}
+                          {a.source === "ONLINE" && <Globe className="h-3 w-3 shrink-0" />}
                           <span className="truncate">{a.patient.firstName}</span>
                         </div>
                         <div className="truncate text-muted">{fmtTime(a.start)} · {a.doctor.name.split(" ")[1]}</div>
@@ -114,7 +115,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: { d
           </div>
         </div>
         <p className="mt-3 text-xs text-muted">
-          Click on any day or appointment to open the day view. <Bot className="inline h-3 w-3" /> marks AI-booked appointments.
+          Click on any day or appointment to open the day view. <Bot className="inline h-3 w-3" /> AI receptionist · <Globe className="inline h-3 w-3" /> Online booking
         </p>
       </>
     );

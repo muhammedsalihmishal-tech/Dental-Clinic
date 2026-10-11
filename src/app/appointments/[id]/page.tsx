@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { fmtDateTime, todayString } from "@/lib/time";
 import { Card, PageHeader } from "@/components/ui";
-import { AppointmentBadge } from "@/components/badges";
+import { AppointmentBadge, BookingSourceBadge } from "@/components/badges";
 import { RescheduleForm } from "./RescheduleForm";
 
 export const dynamic = "force-dynamic";
@@ -51,6 +51,10 @@ export default async function AppointmentPage({ params }: { params: { id: string
             <div>
               <p className="text-xs text-muted">Status</p>
               <div className="mt-0.5"><AppointmentBadge status={appt.status} /></div>
+            </div>
+            <div>
+              <p className="text-xs text-muted">Booked via</p>
+              <div className="mt-0.5"><BookingSourceBadge source={appt.source} /></div>
             </div>
             {appt.notes && (
               <div className="sm:col-span-2">
