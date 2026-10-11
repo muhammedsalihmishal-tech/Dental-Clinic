@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
-import { Bell, Bot, CalendarPlus, ClipboardList, CreditCard, FileText, Mail, MessageCircle, MessageSquare, Pencil, Phone, PhoneCall, Stethoscope } from "lucide-react";
+import { Bell, Bot, CalendarPlus, ClipboardList, CreditCard, FileText, Mail, MessageCircle, MessageSquare, Pencil, Phone, PhoneCall, RotateCcw, Stethoscope } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { fmtDate, fmtDateTime, todayString } from "@/lib/time";
 import { formatMoney, fullName, titleCase, CHANNEL_LABEL } from "@/lib/utils";
@@ -24,6 +24,7 @@ export default async function PatientPage({ params }: { params: { id: string } }
       calls: { orderBy: { startedAt: "desc" } },
       timelineNotes: { orderBy: { createdAt: "desc" } },
       tasks: { where: { done: false } },
+      recallLogs: { include: { treatmentType: true }, orderBy: { sentAt: "desc" } },
     },
   });
   if (!patient) notFound();
@@ -108,6 +109,11 @@ export default async function PatientPage({ params }: { params: { id: string } }
       icon: <FileText className="h-3.5 w-3.5" />,
       title: <>Note by {n.author}</>,
       body: n.body,
+    })),
+    ...patient.recallLogs.map((r) => ({
+      at: r.sentAt,
+      icon: <RotateCcw className="h-3.5 w-3.5" />,
+      title: <>Recall sent · {r.treatmentType.name}</>,
     })),
     ...inboundMessages.map((m) => ({
       at: m.createdAt,
