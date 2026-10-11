@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { Bot, ChevronLeft, ChevronRight, Globe } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { getClinic } from "@/lib/config";
 import { addDays, clinicDateAt, fmtDate, fmtTime, todayString } from "@/lib/time";
@@ -117,9 +117,13 @@ export default async function DaySheetPage({ searchParams }: { searchParams: { d
                           {fmtTime(a.start)}
                         </td>
                         <td className="px-5 py-3">
-                          <Link href={`/patients/${a.patientId}`} className="font-medium hover:text-brand print:no-underline print:pointer-events-none">
-                            {fullName(a.patient)}
-                          </Link>
+                          <div className="flex items-center gap-1.5">
+                            <Link href={`/patients/${a.patientId}`} className="font-medium hover:text-brand print:no-underline print:pointer-events-none">
+                              {fullName(a.patient)}
+                            </Link>
+                            {a.source === "VOICE_AI" && <span title="Booked via AI receptionist"><Bot className="h-3.5 w-3.5 shrink-0 text-violet-500 print:hidden" /></span>}
+                            {a.source === "ONLINE" && <span title="Booked online"><Globe className="h-3.5 w-3.5 shrink-0 text-teal-500 print:hidden" /></span>}
+                          </div>
                           {a.patient.dateOfBirth && (
                             <div className="text-xs text-muted">
                               DOB: {fmtDate(a.patient.dateOfBirth)}

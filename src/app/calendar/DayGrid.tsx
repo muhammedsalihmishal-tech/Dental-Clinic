@@ -2,7 +2,7 @@
 
 import { useRef, useState, useTransition } from "react";
 import Link from "next/link";
-import { Bot } from "lucide-react";
+import { Bot, Globe } from "lucide-react";
 import { AppointmentBadge } from "@/components/badges";
 import { cn, fullName } from "@/lib/utils";
 import { dragRescheduleAppointment, updateAppointmentStatus } from "../actions";
@@ -140,6 +140,7 @@ export function DayGrid({ doctors, hours, firstHour }: Props) {
               >
                 <div className="flex items-center gap-1 font-semibold">
                   {a.source === "VOICE_AI" && <Bot className="h-3 w-3 shrink-0" />}
+                  {a.source === "ONLINE" && <Globe className="h-3 w-3 shrink-0" />}
                   <span className="truncate">{a.patientName}</span>
                 </div>
                 <div className="truncate text-muted">{a.startLabel} · {a.treatmentName}</div>
