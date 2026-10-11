@@ -49,6 +49,7 @@ export default async function Dashboard() {
   ]);
 
   const done = todayAppts.filter((a) => a.status === "COMPLETED").length;
+  const unconfirmed = todayAppts.filter((a) => a.status === "SCHEDULED" && a.start > new Date()).length;
 
   return (
     <>
@@ -68,7 +69,16 @@ export default async function Dashboard() {
         <Card
           className="xl:col-span-2"
           title="Today's schedule"
-          action={<Link href="/calendar" className="text-xs font-medium text-brand">Open calendar →</Link>}
+          action={
+            <div className="flex items-center gap-3">
+              {unconfirmed > 0 && (
+                <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-600 dark:text-amber-400">
+                  {unconfirmed} unconfirmed
+                </span>
+              )}
+              <Link href="/calendar" className="text-xs font-medium text-brand">Open calendar →</Link>
+            </div>
+          }
         >
           {todayAppts.length === 0 ? (
             <Empty>No appointments today.</Empty>
@@ -94,6 +104,11 @@ export default async function Dashboard() {
                   )}
                   {a.patient.medicalAlerts && <Badge tone="rose" className="hidden md:inline-flex">⚠ {a.patient.medicalAlerts}</Badge>}
                   {(() => { const r = noShowRiskScore(a.patient); return r.score >= 25 ? <span className="hidden md:inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: r.color + "22", color: r.color }}>{r.label} risk</span> : null; })()}
+                  {a.status === "SCHEDULED" && a.start > new Date() && (
+                    <span className="hidden sm:inline-flex rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                      Unconfirmed
+                    </span>
+                  )}
                   <AppointmentBadge status={a.status} />
                 </li>
               ))}
