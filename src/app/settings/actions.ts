@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { hash } from "bcryptjs";
 import { prisma } from "@/lib/prisma";
+import { audit } from "@/lib/audit";
 import type { UserRole } from "@prisma/client";
 
 export async function saveClinicSettings(form: FormData) {
@@ -28,7 +29,8 @@ export async function createUser(form: FormData) {
   const password = String(form.get("password") ?? "");
   if (!name || !email || !password) return;
   const passwordHash = await hash(password, 12);
-  await prisma.user.create({ data: { name, email, role, passwordHash } });
+  const user = await prisma.user.create({ data: { name, email, role, passwordHash } });
+  await audit("CREATE", "User", user.id, `${name} (${role})`);
   revalidatePath("/settings/users");
 }
 
@@ -36,6 +38,7 @@ export async function toggleUser(form: FormData) {
   const id = String(form.get("id") ?? "");
   const active = form.get("active") === "true";
   await prisma.user.update({ where: { id }, data: { active } });
+  await audit("UPDATE", "User", id, active ? "activated" : "deactivated");
   revalidatePath("/settings/users");
 }
 
