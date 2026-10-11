@@ -6,6 +6,7 @@ import { sendMessage } from "./messaging";
 import { fullName } from "./utils";
 import { generatePersonalisedMessage } from "./ai-messages";
 import { notifyWaitlistForSlot } from "./waitlist";
+import { manageBookingUrl } from "./tokens";
 
 /** Local time of day that day-based reminders go out (10:00). */
 const DAY_REMINDER_MINUTE = 10 * 60;
@@ -160,9 +161,14 @@ export async function processInboundReply(
       const appt = await prisma.appointment.findFirst({
         where: { patientId: patient.id, status: "SCHEDULED", start: { gt: new Date() } },
         orderBy: { start: "asc" },
+        include: { treatmentType: true, doctor: true },
       });
       if (appt) {
         await prisma.appointment.update({ where: { id: appt.id }, data: { status: "CONFIRMED" } });
+        const c = await getClinic();
+        const manageUrl = manageBookingUrl(appt.id);
+        const replyBody = `Confirmed! See you ${appt.start.toLocaleDateString("en", { weekday: "long" })} ${fmtDate(appt.start)} at ${fmtTime(appt.start)} for your ${appt.treatmentType.name} with ${appt.doctor.name} at ${c.name}. Manage: ${manageUrl} – ${c.name}`;
+        await sendMessage(channel, from, replyBody).catch(() => null);
         await prisma.inboundMessage.updateMany({ where: { from, intent: "CONFIRM", handled: false }, data: { handled: true } });
       }
     }

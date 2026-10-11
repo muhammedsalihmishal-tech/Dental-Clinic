@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
-import { Bell, Bot, CalendarPlus, FileText, Mail, MessageCircle, Pencil, Phone, PhoneCall, Stethoscope } from "lucide-react";
+import { Bell, Bot, CalendarPlus, FileText, Mail, MessageCircle, MessageSquare, Pencil, Phone, PhoneCall, Stethoscope } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { fmtDate, fmtDateTime, todayString } from "@/lib/time";
 import { formatMoney, fullName, titleCase, CHANNEL_LABEL } from "@/lib/utils";
@@ -27,9 +27,10 @@ export default async function PatientPage({ params }: { params: { id: string } }
     },
   });
   if (!patient) notFound();
-  const [treatments, doctors] = await Promise.all([
+  const [treatments, doctors, inboundMessages] = await Promise.all([
     prisma.treatmentType.findMany({ orderBy: { name: "asc" } }),
     prisma.doctor.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
+    prisma.inboundMessage.findMany({ where: { from: patient.phone }, orderBy: { createdAt: "desc" }, take: 50 }),
   ]);
 
   const now = new Date();
@@ -93,6 +94,13 @@ export default async function PatientPage({ params }: { params: { id: string } }
       icon: <FileText className="h-3.5 w-3.5" />,
       title: <>Note by {n.author}</>,
       body: n.body,
+    })),
+    ...inboundMessages.map((m) => ({
+      at: m.createdAt,
+      icon: <MessageSquare className="h-3.5 w-3.5" />,
+      title: <>Reply via {CHANNEL_LABEL[m.channel as "SMS" | "WHATSAPP" | "EMAIL" | "CALL"]}</>,
+      body: m.body,
+      meta: m.intent ?? undefined,
     })),
   ].sort((a, b) => b.at.getTime() - a.at.getTime());
 
