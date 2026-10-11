@@ -54,7 +54,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: { p
               <div className="flex flex-wrap items-start gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="font-mono text-sm font-semibold">{inv.number}</span>
+                    <Link href={`/invoices/${inv.id}`} className="font-mono text-sm font-semibold hover:text-brand">{inv.number}</Link>
                     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLOR[inv.status]}`}>{inv.status}</span>
                   </div>
                   <div className="mt-1 text-sm">
