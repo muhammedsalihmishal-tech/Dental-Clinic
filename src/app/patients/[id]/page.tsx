@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
-import { Bell, Bot, CalendarPlus, FileText, Mail, MessageCircle, MessageSquare, Pencil, Phone, PhoneCall, Stethoscope } from "lucide-react";
+import { Bell, Bot, CalendarPlus, ClipboardList, CreditCard, FileText, Mail, MessageCircle, MessageSquare, Pencil, Phone, PhoneCall, Stethoscope } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { fmtDate, fmtDateTime, todayString } from "@/lib/time";
 import { formatMoney, fullName, titleCase, CHANNEL_LABEL } from "@/lib/utils";
@@ -27,10 +27,21 @@ export default async function PatientPage({ params }: { params: { id: string } }
     },
   });
   if (!patient) notFound();
-  const [treatments, doctors, inboundMessages] = await Promise.all([
+  const [treatments, doctors, inboundMessages, invoices, activePlans] = await Promise.all([
     prisma.treatmentType.findMany({ orderBy: { name: "asc" } }),
     prisma.doctor.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
     prisma.inboundMessage.findMany({ where: { from: patient.phone }, orderBy: { createdAt: "desc" }, take: 50 }),
+    prisma.invoice.findMany({
+      where: { patientId: patient.id },
+      include: { treatmentRecord: { include: { treatmentType: true } } },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+    }),
+    prisma.treatmentPlan.findMany({
+      where: { patientId: patient.id, status: "ACTIVE" },
+      include: { records: { select: { id: true, cost: true, status: true, treatmentType: { select: { name: true } } } } },
+      orderBy: { createdAt: "desc" },
+    }),
   ]);
 
   const now = new Date();
@@ -108,6 +119,15 @@ export default async function PatientPage({ params }: { params: { id: string } }
   ].sort((a, b) => b.at.getTime() - a.at.getTime());
 
   const pending = patient.reminders.filter((r) => r.status === "PENDING").reverse();
+
+  const outstanding = invoices.filter((i) => i.status === "DRAFT" || i.status === "SENT").reduce((s, i) => s + i.amount, 0);
+
+  const INVOICE_TONE: Record<string, "gray" | "violet" | "emerald" | "rose"> = {
+    DRAFT: "gray",
+    SENT: "violet",
+    PAID: "emerald",
+    VOID: "rose",
+  };
 
   return (
     <>
@@ -245,6 +265,87 @@ export default async function PatientPage({ params }: { params: { id: string } }
               ))}
             </dl>
           </Card>
+
+          <Card
+            title={<span className="flex items-center gap-2"><CreditCard className="h-4 w-4 text-brand" /> Billing</span>}
+            action={
+              <Link href={`/invoices?patient=${patient.id}`} className="text-xs font-medium text-brand">
+                All invoices →
+              </Link>
+            }
+          >
+            {invoices.length === 0 ? (
+              <Empty>No invoices yet.</Empty>
+            ) : (
+              <>
+                {outstanding > 0 && (
+                  <div className="border-b border-amber-500/20 bg-amber-500/5 px-5 py-2.5 text-sm text-amber-700 dark:text-amber-400">
+                    <span className="font-semibold">{formatMoney(outstanding)}</span> outstanding
+                  </div>
+                )}
+                <ul className="divide-y divide-border">
+                  {invoices.map((inv) => (
+                    <li key={inv.id} className="flex items-center gap-3 px-5 py-2.5">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs font-semibold">{inv.number}</span>
+                          <Badge tone={INVOICE_TONE[inv.status]}>{inv.status}</Badge>
+                        </div>
+                        <div className="text-xs text-muted">
+                          {inv.treatmentRecord?.treatmentType.name ?? "Invoice"} · {fmtDate(inv.issuedAt)}
+                        </div>
+                      </div>
+                      <span className="shrink-0 text-sm font-semibold">{formatMoney(inv.amount)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </Card>
+
+          {activePlans.length > 0 && (
+            <Card
+              title={<span className="flex items-center gap-2"><ClipboardList className="h-4 w-4 text-brand" /> Treatment plan</span>}
+              action={
+                <Link href={`/plans?patient=${patient.id}`} className="text-xs font-medium text-brand">
+                  All plans →
+                </Link>
+              }
+            >
+              {activePlans.map((plan) => {
+                const total = plan.records.length;
+                const done = plan.records.filter((r) => r.status === "COMPLETED").length;
+                const pct = total ? Math.round((done / total) * 100) : 0;
+                const planCost = plan.records.reduce((s, r) => s + r.cost, 0);
+                return (
+                  <div key={plan.id} className="px-5 py-3.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium">{plan.title}</span>
+                      <span className="text-xs text-muted">{formatMoney(planCost)}</span>
+                    </div>
+                    <div className="mt-2 flex items-center gap-2">
+                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-2">
+                        <div className="h-full rounded-full bg-brand transition-all" style={{ width: `${pct}%` }} />
+                      </div>
+                      <span className="text-xs text-muted">{done}/{total}</span>
+                    </div>
+                    {plan.records.length > 0 && (
+                      <ul className="mt-2 space-y-1">
+                        {plan.records.map((r) => (
+                          <li key={r.id} className="flex items-center gap-2 text-xs text-muted">
+                            <span className={r.status === "COMPLETED" ? "text-emerald-500" : "text-muted"}>
+                              {r.status === "COMPLETED" ? "✓" : "○"}
+                            </span>
+                            {r.treatmentType.name}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                );
+              })}
+            </Card>
+          )}
         </div>
 
         <div className="space-y-6 lg:col-span-2">
