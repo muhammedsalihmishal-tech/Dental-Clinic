@@ -2,9 +2,10 @@ import { CheckCheck } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { fmtDateTime } from "@/lib/time";
 import { fullName, CHANNEL_LABEL } from "@/lib/utils";
-import { Badge, Empty, PageHeader } from "@/components/ui";
+import { Empty, PageHeader } from "@/components/ui";
 import Link from "next/link";
 import { markInboundHandled, markAllInboundHandled } from "../actions";
+import { InboxReply } from "./InboxReply";
 
 export const dynamic = "force-dynamic";
 
@@ -66,31 +67,40 @@ export default async function InboxPage({ searchParams }: { searchParams: { hand
         {messages.map((msg) => {
           const patient = byPhone[msg.from];
           return (
-            <div key={msg.id} className="flex items-start gap-4 px-5 py-4">
-              <div className="flex-1 min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  {patient ? (
-                    <Link href={`/patients/${patient.id}`} className="font-medium hover:underline">
-                      {fullName(patient)}
-                    </Link>
-                  ) : (
-                    <span className="font-medium text-muted">{msg.from}</span>
-                  )}
-                  <span className="text-xs text-muted">{CHANNEL_LABEL[msg.channel]}</span>
-                  {msg.intent && (
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${INTENT_COLOR[msg.intent] ?? INTENT_COLOR.UNKNOWN}`}>
-                      {msg.intent}
-                    </span>
-                  )}
+            <div key={msg.id} className="px-5 py-4">
+              <div className="flex items-start gap-4">
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {patient ? (
+                      <Link href={`/patients/${patient.id}`} className="font-medium hover:underline">
+                        {fullName(patient)}
+                      </Link>
+                    ) : (
+                      <span className="font-medium text-muted">{msg.from}</span>
+                    )}
+                    <span className="text-xs text-muted">{CHANNEL_LABEL[msg.channel]}</span>
+                    {msg.intent && (
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${INTENT_COLOR[msg.intent] ?? INTENT_COLOR.UNKNOWN}`}>
+                        {msg.intent}
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-sm">{msg.body}</p>
+                  <p className="mt-0.5 text-xs text-muted">{fmtDateTime(msg.createdAt)}</p>
                 </div>
-                <p className="mt-1 text-sm">{msg.body}</p>
-                <p className="mt-0.5 text-xs text-muted">{fmtDateTime(msg.createdAt)}</p>
+                {!msg.handled && (
+                  <div className="flex shrink-0 gap-1">
+                    <form action={markInboundHandled}>
+                      <input type="hidden" name="id" value={msg.id} />
+                      <button className="btn-ghost btn-sm">Done</button>
+                    </form>
+                  </div>
+                )}
               </div>
               {!msg.handled && (
-                <form action={markInboundHandled}>
-                  <input type="hidden" name="id" value={msg.id} />
-                  <button className="btn-ghost btn-sm shrink-0">Done</button>
-                </form>
+                <div className="mt-2 pl-0">
+                  <InboxReply id={msg.id} phone={msg.from} channel={msg.channel} />
+                </div>
               )}
             </div>
           );

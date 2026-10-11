@@ -393,6 +393,18 @@ export async function markAllInboundHandled() {
   revalidatePath("/inbox");
 }
 
+export async function replyToInbound(_prev: ActionState, f: FormData): Promise<ActionState> {
+  const id = str(f, "id")!;
+  const phone = str(f, "phone")!;
+  const channel = str(f, "channel") as Channel;
+  const body = str(f, "body");
+  if (!body) return { error: "Message cannot be empty." };
+  await sendMessage(channel as "SMS" | "WHATSAPP", phone, body);
+  await prisma.inboundMessage.update({ where: { id }, data: { handled: true } });
+  revalidatePath("/inbox");
+  return { ok: true };
+}
+
 // ---------- Reminder rules (settings page) ----------
 
 export async function saveReminderRule(f: FormData) {
