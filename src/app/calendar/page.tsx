@@ -196,6 +196,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: { d
               <Link href={`/calendar?date=${date}`} className="btn-primary btn-sm">Day</Link>
               <Link href={`/calendar?view=week&date=${date}`} className="btn-ghost btn-sm">Week</Link>
             </div>
+            <Link href={`/calendar/day-sheet?date=${date}`} className="btn-ghost btn-sm">Day sheet</Link>
           </>
         }
       />
