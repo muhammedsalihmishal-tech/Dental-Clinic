@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { fmtDateTime } from "@/lib/time";
 import { Card, Empty, Field, PageHeader } from "@/components/ui";
@@ -38,7 +39,7 @@ export default async function CampaignsPage() {
                 <div className="flex flex-wrap items-start gap-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-medium">{c.name}</span>
+                      <Link href={`/campaigns/${c.id}`} className="font-medium hover:text-brand">{c.name}</Link>
                       <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLOR[c.status]}`}>
                         {c.status}
                       </span>
@@ -52,7 +53,8 @@ export default async function CampaignsPage() {
                     </div>
                     {c.status === "SENT" && (
                       <p className="mt-1 text-xs text-muted">
-                        Sent {fmtDateTime(c.sentAt!)} · {c.sentCount} delivered · {c.failCount} failed
+                        Sent {fmtDateTime(c.sentAt!)} · {c.sentCount} delivered · {c.failCount} failed ·{" "}
+                        <Link href={`/campaigns/${c.id}`} className="text-brand hover:underline">View details</Link>
                       </p>
                     )}
                     {c.status === "DRAFT" && (
