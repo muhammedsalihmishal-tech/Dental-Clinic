@@ -604,6 +604,94 @@ export async function updateLabOrderStatus(f: FormData) {
   revalidatePath("/lab");
 }
 
+// ---------- Patient bulk import ----------
+
+export type ImportRow = {
+  firstName: string;
+  lastName: string;
+  phone: string;
+  email: string;
+  dateOfBirth: string;
+  gender: string;
+  address: string;
+  status: string;
+  language: string;
+  preferredChannel: string;
+  medicalAlerts: string;
+  allergies: string;
+  insurance: string;
+  tags: string;
+  notes: string;
+};
+
+export type ImportResult = { created: number; skipped: number; errors: string[] };
+
+export async function importPatients(rows: ImportRow[]): Promise<ImportResult> {
+  let created = 0;
+  let skipped = 0;
+  const errors: string[] = [];
+
+  const phones = rows.map((r) => normalizePhone(r.phone)).filter(Boolean);
+  const existing = await prisma.patient.findMany({
+    where: { phone: { in: phones } },
+    select: { phone: true },
+  });
+  const existingPhones = new Set(existing.map((p) => p.phone));
+  const seenInBatch = new Set<string>();
+
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const rowNum = i + 2;
+    const phone = normalizePhone(r.phone);
+
+    if (!r.firstName?.trim()) {
+      errors.push(`Row ${rowNum}: First Name is required.`);
+      skipped++;
+      continue;
+    }
+    if (!phone || phone.replace(/\D/g, "").length < 6) {
+      errors.push(`Row ${rowNum}: Invalid phone number.`);
+      skipped++;
+      continue;
+    }
+    if (existingPhones.has(phone) || seenInBatch.has(phone)) {
+      skipped++;
+      continue;
+    }
+
+    seenInBatch.add(phone);
+
+    try {
+      await prisma.patient.create({
+        data: {
+          firstName: r.firstName.trim(),
+          lastName: r.lastName?.trim() ?? "",
+          phone,
+          email: r.email?.trim() || null,
+          dateOfBirth: r.dateOfBirth ? new Date(`${r.dateOfBirth}T00:00:00Z`) : null,
+          gender: r.gender?.trim() || null,
+          address: r.address?.trim() || null,
+          status: (["LEAD", "NEW", "ACTIVE", "NEEDS_FOLLOW_UP", "INACTIVE"].includes(r.status) ? r.status : "NEW") as PatientStatus,
+          language: r.language?.trim() || "English",
+          preferredChannel: (["SMS", "WHATSAPP"].includes(r.preferredChannel) ? r.preferredChannel : "WHATSAPP") as Channel,
+          medicalAlerts: r.medicalAlerts?.trim() || null,
+          allergies: r.allergies?.trim() || null,
+          insurance: r.insurance?.trim() || null,
+          tags: r.tags ? r.tags.split(";").map((t) => t.trim()).filter(Boolean) : [],
+          notes: r.notes?.trim() || null,
+        },
+      });
+      created++;
+    } catch {
+      errors.push(`Row ${rowNum}: Failed to create (${r.firstName} ${r.lastName}).`);
+      skipped++;
+    }
+  }
+
+  if (created > 0) revalidatePath("/patients");
+  return { created, skipped, errors };
+}
+
 // ---------- Public online booking ----------
 
 export async function bookPublicAppointment(f: FormData): Promise<{ error?: string; appointmentId?: string }> {
