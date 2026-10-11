@@ -5,6 +5,22 @@ import { hash } from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import type { UserRole } from "@prisma/client";
 
+export async function saveClinicSettings(form: FormData) {
+  const data = {
+    name: String(form.get("name") ?? "").trim() || "Smile Studio Dental",
+    phone: String(form.get("phone") ?? "").trim(),
+    address: String(form.get("address") ?? "").trim(),
+    timezone: String(form.get("timezone") ?? "Asia/Kolkata").trim(),
+  };
+  await prisma.clinicSettings.upsert({
+    where: { id: "default" },
+    create: { id: "default", ...data },
+    update: data,
+  });
+  revalidatePath("/settings/clinic");
+  revalidatePath("/", "layout");
+}
+
 export async function createUser(form: FormData) {
   const name = String(form.get("name") ?? "").trim();
   const email = String(form.get("email") ?? "").trim().toLowerCase();

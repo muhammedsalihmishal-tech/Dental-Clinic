@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { BookingError, bookAppointment, rescheduleAppointment, setAppointmentStatus } from "@/lib/booking";
 import { processDueReminders, scheduleTreatmentFollowUps } from "@/lib/reminders";
 import { sendMessage } from "@/lib/messaging";
-import { clinic } from "@/lib/config";
+import { getClinic } from "@/lib/config";
 import { clinicDateAt, labelToMinutes } from "@/lib/time";
 import { formatMoney, normalizePhone } from "@/lib/utils";
 
@@ -268,9 +268,10 @@ export async function runReactivationCampaign(): Promise<{ sent: number; skipped
   let sent = 0;
   let skipped = 0;
 
+  const c = await getClinic();
   for (const p of patients) {
     if (p.records.length > 0) { skipped++; continue; }
-    const body = `Hi ${p.firstName}, it's been a while since we last saw you at ${clinic.name}! We'd love to catch up and make sure your smile is in great shape. Give us a call at ${clinic.phone} to book your next visit. – ${clinic.name}`;
+    const body = `Hi ${p.firstName}, it's been a while since we last saw you at ${c.name}! We'd love to catch up and make sure your smile is in great shape. Give us a call at ${c.phone} to book your next visit. – ${c.name}`;
     const result = await sendMessage(p.preferredChannel as "SMS" | "WHATSAPP", p.phone, body).catch(() => ({ ok: false }));
     if (result.ok) sent++; else skipped++;
   }
@@ -338,10 +339,11 @@ export async function sendInvoiceMessage(f: FormData) {
     where: { id },
     include: { patient: true, treatmentRecord: { include: { treatmentType: true, doctor: true } } },
   });
+  const c = await getClinic();
   const treatmentLine = inv.treatmentRecord
     ? `${inv.treatmentRecord.treatmentType.name} with ${inv.treatmentRecord.doctor.name}`
     : "your recent visit";
-  const body = `Hi ${inv.patient.firstName}, your invoice ${inv.number} for ${treatmentLine} is ₹${formatMoney(inv.amount)} (${inv.status}). For queries call ${clinic.phone}. – ${clinic.name}`;
+  const body = `Hi ${inv.patient.firstName}, your invoice ${inv.number} for ${treatmentLine} is ₹${formatMoney(inv.amount)} (${inv.status}). For queries call ${c.phone}. – ${c.name}`;
   await sendMessage(inv.patient.preferredChannel as "SMS" | "WHATSAPP", inv.patient.phone, body);
   await prisma.invoice.update({ where: { id }, data: { status: "SENT" } });
   revalidatePath("/invoices");
@@ -430,7 +432,8 @@ export async function sendRecallSms(f: FormData) {
   const patientId = str(f, "patientId")!;
   const patient = await prisma.patient.findUniqueOrThrow({ where: { id: patientId } });
   if (patient.optOut) return;
-  const body = `Hi ${patient.firstName}, it's time for your routine dental check-up at ${clinic.name}! Call us at ${clinic.phone} to book. – ${clinic.name}`;
+  const c = await getClinic();
+  const body = `Hi ${patient.firstName}, it's time for your routine dental check-up at ${c.name}! Call us at ${c.phone} to book. – ${c.name}`;
   await sendMessage(patient.preferredChannel as "SMS" | "WHATSAPP", patient.phone, body).catch(() => null);
   revalidatePath("/recall");
 }
@@ -481,12 +484,13 @@ export async function sendCampaign(f: FormData) {
 
   await prisma.campaign.update({ where: { id }, data: { status: "SENDING" } });
 
+  const c = await getClinic();
   let sent = 0, fail = 0;
   for (const p of filtered) {
     const body = campaign.message
       .replace(/\{\{name\}\}/g, p.firstName)
-      .replace(/\{\{clinic\}\}/g, clinic.name)
-      .replace(/\{\{phone\}\}/g, clinic.phone);
+      .replace(/\{\{clinic\}\}/g, c.name)
+      .replace(/\{\{phone\}\}/g, c.phone);
     const result = await sendMessage(p.preferredChannel as "SMS" | "WHATSAPP", p.phone, body).catch(() => ({ ok: false }));
     await prisma.campaignMessage.create({ data: { campaignId: id, patientId: p.id, sent: (result as { ok: boolean }).ok, error: (result as { ok: boolean }).ok ? null : "Failed" } });
     if ((result as { ok: boolean }).ok) sent++; else fail++;
@@ -523,4 +527,46 @@ export async function updateLabOrderStatus(f: FormData) {
     data: { status, receivedAt: status === "RECEIVED" ? new Date() : undefined },
   });
   revalidatePath("/lab");
+}
+
+// ---------- Public online booking ----------
+
+export async function bookPublicAppointment(f: FormData): Promise<{ error?: string; appointmentId?: string }> {
+  const treatmentTypeId = str(f, "treatmentTypeId");
+  const doctorId = str(f, "doctorId");
+  const startIso = str(f, "start");
+  const firstName = str(f, "firstName");
+  const lastName = str(f, "lastName") ?? "";
+  const phone = normalizePhone(str(f, "phone") ?? "");
+  const email = str(f, "email");
+
+  if (!treatmentTypeId || !doctorId || !startIso || !firstName || !phone) {
+    return { error: "Please fill in all required fields." };
+  }
+  if (phone.replace(/\D/g, "").length < 6) return { error: "Please enter a valid phone number." };
+
+  const start = new Date(startIso);
+
+  // Find or create patient
+  let patient = await prisma.patient.findUnique({ where: { phone } });
+  if (!patient) {
+    patient = await prisma.patient.create({
+      data: { firstName, lastName, phone, email: email ?? null, status: "NEW" },
+    });
+  }
+
+  try {
+    const appt = await bookAppointment({
+      patientId: patient.id,
+      doctorId,
+      treatmentTypeId,
+      start,
+      source: "ONLINE",
+      notes: str(f, "notes"),
+    });
+    return { appointmentId: appt.id };
+  } catch (e) {
+    if (e instanceof BookingError) return { error: e.message };
+    return { error: "This slot is no longer available. Please choose another time." };
+  }
 }

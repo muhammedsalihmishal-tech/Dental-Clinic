@@ -5,6 +5,16 @@ export const clinic = {
   address: process.env.CLINIC_ADDRESS ?? "",
 };
 
+/** Reads live clinic settings from DB, falling back to env/defaults. */
+export async function getClinic() {
+  try {
+    const { prisma } = await import("./prisma");
+    const row = await prisma.clinicSettings.findUnique({ where: { id: "default" } });
+    if (row) return { name: row.name, phone: row.phone, address: row.address, timezone: row.timezone };
+  } catch {}
+  return { ...clinic };
+}
+
 /** Reminders are never sent between these local hours; they slide to QUIET_HOURS.resumeAt. */
 export const QUIET_HOURS = { start: 21, end: 8, resumeAt: 9 };
 
